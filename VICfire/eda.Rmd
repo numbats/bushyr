@@ -24,7 +24,7 @@ library(spatstat)
 load("save.RData")
 ```
 
-## historical data (`training`) *historical bushfire (not reliable)
+## historical data (`training`) *historical bushfire (less reliable)
 ```{r}
 training <- read_csv("data/training.csv")
 
@@ -161,28 +161,13 @@ ggplot() +
   # themes
   ggthemes::theme_map() +
   theme(legend.position = "right")
-
-# === bar plots; no. of ignitions; facet by month 
-
-# `training_pred` *historical data 
-training_pred %>% 
-  group_by(month) %>% 
-  count(cause) %>% 
-  ggplot() +
-  geom_col(aes(x = cause,
-               y = n,
-               fill = cause)) +
-  facet_wrap(~ month) +
-  # themes
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90))
 ```
 
 ## `cause` by `year` bar plot (temporal)
 ```{r}
 # ---------- `predict_x` *satellite data
 
-# --- `cause` by `month`
+# --- `cause` by `year`
 predict_x %>% 
   group_by(year) %>% 
   count(cause) %>% 
@@ -272,7 +257,7 @@ vic_map_sf <- sf::st_transform(vic_map_sf,
 
 # === create cause_sf (sfdf POINT); from predictions *satellite data
 cause_sf <- predict_x %>% 
-  select(lon, lat, cause, year) %>%  # extract year; from date
+  select(lon, lat, cause, year, FOR_CAT) %>%  # extract year; from date
   sf::st_as_sf(coords = c("lon", "lat"),
                crs = 4326)
 
@@ -286,7 +271,7 @@ cause_training_sf <- training_pred %>%
 ## create spatial grid `RasterBrick`
 
 
-### create `RasterBrick`
+### create `RasterBrick`; cropped to Victoria map window
 
 > `RasterBrick`; designed; store multiple raster (with same extents(bbox) & dimensions)
   - i.e. multi-layer raster
@@ -326,10 +311,46 @@ vic_raster_crop <- vic_raster %>%
 ```
 
 ### ignition Rules
-> TO BE FILLED
-   - e.g. filter to year 
+> to be set; when more data and information on appropriate rules are determined
+   - e.g. filter to seasons 
+    - fire; more prone in summer (increase bushfire risk)
    - e.g. categorise each grid cell; according to fuel(vegetation)
-    - e.g. fire cannot occur on water 
+    - e.g. fire cannot occur on water (no bushfire risk)
+
+```{r}
+ignition_rules_raster <- raster::brick(
+  # no. of rows & columns (directly linked to resolution of grid cell)
+  nrows = 20,
+  ncols = 20,
+  
+  # bbox (bounding box of Victoria)
+  xmn = 140.9617,
+  xmx = 149.9763,
+  ymn = -39.13396,
+  ymx = -33.99605,
+  
+  # crs
+  crs = 4326,
+  
+  # set `raster` values (rowwise)
+  # vals = seq(from = 1, to = 400000, by = 1000) 
+  )
+
+# --- convert `sp` to `sf` Polygons`; to conduct spatial join 
+ignition_rules_sp <- as(ignition_rules_raster, "SpatialPolygonsDataFrame")
+ignition_rules_sf <- sf::st_as_sf(ignition_rules_sp) 
+
+ignition_rules_sf_values <- sf::st_join(ignition_rules_sf, cause_sf) 
+```
+
+```{r}
+# --- plot ignition rule 
+tmap::tm_shape(ignition_rules_sf_values) +
+  tm_polygons(col = "FOR_CAT") +
+  tm_shape(vic_map_sf) +
+  tm_borders(lwd = 3)
+```
+
 
 ### Set values to each grid cell
 
@@ -382,6 +403,8 @@ ignition_rasterize_training <- raster::rasterize(x = cause_training_sp,# `Spatia
 ignition_raster_values <- raster::getValues(ignition_rasterize) %>% # extract count values
   tibble(fire_count = .) %>% 
   replace_na(list(fire_count = 0)) %>% # replace NA with 0 (no fire ignitions) 
+  mutate(id = 1:nrow(.),
+         .before = fire_count) %>% 
   mutate(fire_prop = fire_count / sum(fire_count)) %>% # no. of fire ignitions in a cell / total no. of fire ignitions
   as.matrix() # turn intro matrix (each column = 1 layer in `RasterBrick`)
 
@@ -389,12 +412,13 @@ ignition_raster_values <- raster::getValues(ignition_rasterize) %>% # extract co
 ignition_raster_values_training <- raster::getValues(ignition_rasterize_training) %>% # extract count values
   tibble(fire_count = .) %>% 
   replace_na(list(fire_count = 0)) %>% # replace NA with 0 (no fire ignitions) 
+  # insert `id` column 
+  mutate(id = 1:nrow(.),
+         .before = fire_count) %>% 
   mutate(fire_prop = fire_count / sum(fire_count)) %>% # no. of fire ignitions in a cell / total no. of fire ignitions
   as.matrix() # turn intro matrix (each column = 1 layer in `RasterBrick`)
 
 # --- vic_raster_crop; with assigned values 
-
-#  
 vic_raster_crop_values <- raster::setValues(x = vic_raster_crop,
                                             values = ignition_raster_values)
 
@@ -410,6 +434,60 @@ vic_raster_crop_values_training %>%
 ```
 
 > `training` (historical data) & `predict_x` (satellite data); very different in terms of where fire ignited 
+
+```{r}
+# --- side-by-side dot plot
+vic_raster_crop_values_df <- vic_raster_crop_values %>% 
+  raster::getValues() %>% 
+  as_tibble() 
+
+# `fire_count`
+vic_raster_crop_values_df %>% 
+  ggplot() +
+  geom_dotplot(aes(x = factor(id),
+                   y = fire_count),
+               binaxis = "y",
+               stackdir = "center",
+               position = "dodge",
+               dotsize = 0.3) +
+  geom_dotplot(aes(x = factor(id),
+                   y = fire_count),
+               binaxis = "y",
+               stackdir = "center",
+               position = "dodge",
+               dotsize = 0.3,
+               fill = "red",
+               data = filter(vic_raster_crop_values_df, fire_count != 0)) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90,
+                                   size = 8)) +
+  labs(x = "Cell ID",
+       y = "Fire Count")
+
+# `fire_prop`
+vic_raster_crop_values_df %>% 
+  ggplot() +
+  geom_dotplot(aes(x = factor(id),
+                   y = fire_prop),
+               binaxis = "y",
+               stackdir = "center",
+               position = "dodge",
+               dotsize = 0.3) +
+  geom_dotplot(aes(x = factor(id),
+                   y = fire_prop),
+               binaxis = "y",
+               stackdir = "center",
+               position = "dodge",
+               dotsize = 0.3,
+               fill = "red",
+               data = filter(vic_raster_crop_values_df, fire_prop != 0)) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90,
+                                   size = 8)) +
+  labs(x = "Cell ID",
+       y = "Fire proportion")
+```
+
 
 # Final map (in app) [WIP]
 ```{r}
