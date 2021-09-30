@@ -5,7 +5,8 @@ library(shinyWidgets)
 library(shinycssloaders)
 # **************************************** outside app ****************************************
 
-options(spinner.color="#b22222")
+# --- set spinner colour to red
+options(spinner.color = "#b22222")
 
 # ==================== read in data ====================
 
@@ -59,6 +60,23 @@ ui <- fluidPage(
     status = "danger"
   ),
 
+  # --- user; select season(s)
+  shinyWidgets::checkboxGroupButtons(
+    inputId = "selected_seasons",
+    label = "Select Seasons",
+    choices = c("summer", "autumn", "winter", "spring"), # year choices
+    selected = c("summer", "autumn", "winter", "spring"), # default to all seasons
+    status = "danger"
+  ),
+
+  shinyWidgets::checkboxGroupButtons(
+    inputId = "selected_causes",
+    label = "Select Causes",
+    choices = c("lightning", "burning_off", "accident", "arson"), # `cause` choices
+    selected = c("lightning", "burning_off", "accident", "arson"), # default to all causes
+    status = "danger"
+  ),
+
   # --- run simulation; when user click button
   shiny::actionButton(inputId = "run_sim",
                       label = "Run simulation!")
@@ -75,7 +93,9 @@ server <- function(input, output) {
   vic_raster_crop_values_join <- shiny::reactive({
     # --- user-specified years
     cause_join_sf <- cause_join_sf %>%
-      filter(year %in% input$selected_years)
+      filter(year %in% input$selected_years,
+             season %in% input$selected_seasons,
+             cause %in% input$selected_causes)
 
     # --- convert from `sf` -> `spdf` -> `SpatialPoints`; to be able; use `raster::rasterize` (count; no. of pts.; in each raster cell)
 
@@ -112,58 +132,73 @@ server <- function(input, output) {
 
 
   # ==================== run simulation ====================
-  sim_count_raster <- eventReactive(input$run_sim,
-                                    {
-                                      # --- create empty storage matrix
-                                      sim_count <- matrix(NA,
-                                                          nrow = 0,
-                                                          ncol = 3)
+  sim_count_raster_sf <- eventReactive(input$run_sim,
+                                       {
+                                         # --- frequency distribution; to draw no. of bushfires
+                                         # based on user selection of `year` and `seasons`
+                                         freq_dist_year_season <- cause_join_sf %>%
+                                           count(year)
 
-                                      # --- run for loop: simulate random points (bushfire ignitions); in `raster` cell; return coordinates (matrix)
-                                      for(i in 1:2000){
-                                        # simulate random points; in `raster` cells
-                                        sim <- enmSdm::sampleRast(x = vic_raster_crop_values_join()$fire_count, # `raster` object
-                                                                  # *** draw no. of points; from frequency distribution ***
-                                                                  n = sample(1:10,
-                                                                             size = 1), # 1 number
-                                                                  replace = F, # w/o replacement
-                                                                  prob = T) # sample cells with probabilities proportional to cell value (fire_count)
+                                         # --- create empty storage matrix
+                                         sim_count <- matrix(NA,
+                                                             nrow = 0,
+                                                             ncol = 3)
 
-                                        # include 3rd column: simulation iteration number
-                                        sim <- cbind(sim, rep(i, nrow(sim)))
+                                         # --- run for loop: simulate random points (bushfire ignitions); in `raster` cell; return coordinates (matrix)
+                                         for(i in 1:1000){
+                                           # simulate random points; in `raster` cells
+                                           sim <- enmSdm::sampleRast(x = vic_raster_crop_values_join()$fire_count, # `raster` object
+                                                                     # *** draw no. of points; from frequency distribution ***
+                                                                     n = sample(freq_dist_year_season$n,
+                                                                                size = 1), # 1 number
+                                                                     replace = T, # w replacement
+                                                                     prob = T) # sample cells with probabilities proportional to cell value (fire_count)
 
-                                        # store results in `sim_count`
-                                        sim_count <- rbind(sim_count, sim)
-                                      }
+                                           # include 3rd column: simulation iteration number
+                                           sim <- cbind(sim, rep(i, nrow(sim)))
 
-                                      # create `SpatialPoints` object to store simulation points;
-                                      # so; able; `rasterize` (count no. of points in each cell)
-                                      sim_count_sp <- sim_count %>%
-                                        as_tibble() %>%
-                                        rename(lon = x,
-                                               lat = y,
-                                               sim_id = V3) %>%
-                                        select(-sim_id) %>% # cannot have `sim_id` when `rasterize`
-                                        # convert to `sp` object
-                                        sp::SpatialPoints()
+                                           # store results in `sim_count`
+                                           sim_count <- rbind(sim_count, sim)
+                                         }
+
+                                         # create `SpatialPoints` object to store simulation points;
+                                         # so; able; `rasterize` (count no. of points in each cell)
+                                         sim_count_sp <- sim_count %>%
+                                           as_tibble() %>%
+                                           rename(lon = x,
+                                                  lat = y,
+                                                  sim_id = V3) %>%
+                                           select(-sim_id) %>% # cannot have `sim_id` when `rasterize`
+                                           # convert to `sp` object
+                                           sp::SpatialPoints()
 
 
-                                      # --- count number of points(bushfire ignitions); in each cell
-                                      raster::rasterize(x = sim_count_sp,# `SpatialPoints` object
-                                                        y = vic_raster_crop, # `Raster` object
-                                                        fun = "count")
-                                    })
+                                         # --- count number of points(bushfire ignitions); in each cell
+                                         sim_count_raster <- raster::rasterize(x = sim_count_sp,# `SpatialPoints` object
+                                                                               y = vic_raster_crop, # `Raster` object
+                                                                               fun = "count")
+
+                                         # --- convert from `raster` -> `spdf` -> `sf`; to plot in `tmap`
+                                         # hovering over variable; can only work with sf polygon (grid cells) using `tm_polygons`
+                                         # doesn't work with `tm_raster`
+                                         sim_count_raster_sp <- as(sim_count_raster, "SpatialPolygonsDataFrame")
+
+                                         sf::st_as_sf(sim_count_raster_sp) %>%
+                                           rename(fire_count = layer) %>%
+                                           mutate(fire_count = fire_count / 1000) # divide `fire_count`; by no. of simulations ∴ output represent no. of bushfires in the number of months in `season` chosen by user
+                                       })
 
 
   output$map <- tmap::renderTmap({
     # plot `raster`; fill by counts
     tmap::tm_basemap(leaflet::providers$Esri.WorldTopoMap) +
-    tmap::tm_shape(sim_count_raster()) + # simulation result; after clicking run simuatlion button
-      tmap::tm_raster(alpha = 0.5,
-                      title = "Number of simulated fire ignitions") +
+    tmap::tm_shape(sim_count_raster_sf()) + # simulation result; after clicking run simuatlion button
+      tmap::tm_polygons(alpha = 0.5,
+                        col = "fire_count",
+                        title = "Number of simulated fire ignitions") +
       # include outline of victoria map
       tmap::tm_shape(vic_map_sf) +
-      tmap::tm_polygons(alpha = 0)
+      tmap::tm_borders(lwd = 2)
   })
 
 }
