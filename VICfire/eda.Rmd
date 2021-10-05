@@ -38,7 +38,7 @@ training <- training %>%
   filter(new_cause != "relight")
 
 
-training <- select(training, -c(EVENTID:FIRE_NUM), -id, -CAUSE, -FOREST, -FOR_CODE, -FOR_CAT)
+training <- dplyr::select(training, -c(EVENTID:FIRE_NUM), -id, -CAUSE, -FOREST, -FOR_CODE, -FOR_CAT)
 
 training <- training %>% 
   mutate(year = factor(lubridate::year(FIRE_START)),
@@ -86,7 +86,7 @@ training <- mutate(training,
 training <- na.omit(training)
 
 training <- training %>% 
-  select(-dist_road, -dist_cfa, -dist_camp, -FIRE_START)
+  dplyr::select(-dist_road, -dist_cfa, -dist_camp, -FIRE_START)
 ```
 
 ## import random forest model (`final_model`)
@@ -94,7 +94,7 @@ training <- training %>%
 final_model <- readr::read_rds("data/Final_model.rds")
 ```
 
-## training data `predict_x` *satellite data
+## `predict_x` training data *satellite data
 ```{r}
 # Read in predict data
 predict_x <- readr::read_csv("data/predict_x.csv")
@@ -126,6 +126,34 @@ predict_x <- predict_x %>%
 ```
 
 
+## join historical & satellite data
+```{r}
+# --- select relevant variables
+cause_df <- predict_x %>% 
+  dplyr::select(lon, lat, cause, year, month)
+
+cause_training_df <- training_pred %>% 
+  dplyr::select(lon, lat, cause, year, month)
+```
+
+
+```{r}
+cause_join_df <- full_join(cause_df, cause_training_df)
+
+cause_join_df <- cause_join_df %>% 
+  mutate(season = case_when(
+    month %in% c(12, 1, 2) ~ "summer",
+    month %in% c(3, 4, 5) ~ "autumn",
+    month %in% c(6, 7, 8) ~ "winter",
+    month %in% c(9, 10, 11) ~ "spring"
+  ))
+
+save(cause_join_df, file = "data/cause_join_df")
+
+cause_join_sf <- cause_join_df %>% 
+  sf::st_as_sf(coords = c("lon", "lat"))
+```
+
 ```{r}
 # e.g. === plot results
 au_map <- rnaturalearth::ne_states(country = 'Australia', 
@@ -142,7 +170,7 @@ ggplot() +
                  y = lat,
                  colour = cause),
              alpha = 0.8,
-             data = training_pred) +
+             data = cause_join_df) +
   facet_wrap(~ month,
              ncol = 3) +
   ggthemes::theme_map() +
@@ -162,70 +190,6 @@ ggplot() +
   ggthemes::theme_map() +
   theme(legend.position = "right")
 ```
-
-## `cause` by `year` bar plot (temporal)
-```{r}
-# ---------- `predict_x` *satellite data
-
-# --- `cause` by `year`
-predict_x %>% 
-  group_by(year) %>% 
-  count(cause) %>% 
-  mutate(total = sum(n)) %>% 
-  ggplot() +
-  geom_col(aes(x = factor(year),
-               y = total)) +
-  geom_col(aes(x = factor(year),
-               y = n,
-               fill = cause)) +
-  facet_wrap(. ~ cause) +
-  theme_bw()
-
-# --- `cause` by `month`
-predict_x %>% 
-  group_by(month) %>% 
-  count(cause) %>% 
-  mutate(total = sum(n)) %>% 
-  ggplot() +
-  geom_col(aes(x = factor(month),
-               y = total)) +
-  geom_col(aes(x = factor(month),
-               y = n,
-               fill = cause)) +
-  facet_wrap(. ~ cause) +
-  theme_bw()
-```
-
-```{r}
-# ---------- `training_pred` *historical data
-training_pred %>% 
-  group_by(year) %>% 
-  count(cause) %>% 
-  mutate(total = sum(n)) %>% 
-  ggplot() +
-  geom_col(aes(x = factor(year),
-               y = total)) +
-  geom_col(aes(x = factor(year),
-               y = n,
-               fill = cause)) +
-  facet_wrap(. ~ cause) +
-  theme_bw()
-
-# --- `cause` by `month`
-training_pred %>% 
-  group_by(month) %>% 
-  count(cause) %>% 
-  mutate(total = sum(n)) %>% 
-  ggplot() +
-  geom_col(aes(x = factor(month),
-               y = total)) +
-  geom_col(aes(x = factor(month),
-               y = n,
-               fill = cause)) +
-  facet_wrap(. ~ cause) +
-  theme_bw()
-```
-
 
 
 # ignition grid 
@@ -257,13 +221,13 @@ vic_map_sf <- sf::st_transform(vic_map_sf,
 
 # === create cause_sf (sfdf POINT); from predictions *satellite data
 cause_sf <- predict_x %>% 
-  select(lon, lat, cause, year, FOR_CAT) %>%  # extract year; from date
+  dplyr::select(lon, lat, cause, year, month, FOR_CAT) %>%  # extract year; from date
   sf::st_as_sf(coords = c("lon", "lat"),
                crs = 4326)
 
 # === create cause_training_sf (sfdf POINT); *historical (`training`) data
 cause_training_sf <- training_pred %>% 
-  select(lon, lat, cause, year) %>% 
+  dplyr::select(lon, lat, cause, year, month) %>% 
   sf::st_as_sf(coords = c("lon", "lat"),
                crs = 4326)
 ```
@@ -336,7 +300,7 @@ ignition_rules_raster <- raster::brick(
   # vals = seq(from = 1, to = 400000, by = 1000) 
   )
 
-# --- convert `sp` to `sf` Polygons`; to conduct spatial join 
+# --- convert `raster` => `spPolygonsdf` => `sf` Polygons`; to conduct spatial join 
 ignition_rules_sp <- as(ignition_rules_raster, "SpatialPolygonsDataFrame")
 ignition_rules_sf <- sf::st_as_sf(ignition_rules_sp) 
 
@@ -352,17 +316,17 @@ tmap::tm_shape(ignition_rules_sf_values) +
 ```
 
 
-### Set values to each grid cell
+### Initial ignition grid: Set values to each grid cell
 
 > set values to ignition grid cell
-  - `fire_count`: count the number of fire ignitions; per grid 
+  - `fire_count`: count the number of fire ignitions; per grid cell
   - `fire_prop`: # ignitions in grid cell / # total no. of ignitions
 
 * note: good to separate satellite data (`predict_x`) with historical data (`training_pred`)
   - so; able; parse them out; when examining grid 
 
 ```{r}
-# ========== convert spdf to SpatialPoints; to be able; use `rasterize` (count; no. of pts.; in each raster cell)
+# ========== convert `sf` -> `spdf` -> SpatialPoints; to be able; use `rasterize` (count; no. of pts.; in each raster cell)
 
 # ---------- predict_x *satellite data
 cause_spdf <- as(cause_sf, Class = "Spatial")
@@ -372,14 +336,48 @@ cause_sp <- as(cause_spdf, "SpatialPoints")
 
 # will filter `sf` object; before turning int `spdf` object in app  
 # e.g. filter to year 2000 only (user-specification!)
-cause_training_sf <- cause_training_sf %>% 
-  filter(year == 2000)
+cause_training_sf1 <- cause_training_sf %>% 
+  filter(year == 2018,
+         month %in% c(1, 2, 3, 10, 11, 12)) # same months as satellite data 
 
-cause_training_spdf <- as(cause_training_sf, Class = "Spatial")
+cause_training_spdf <- as(cause_training_sf1, Class = "Spatial")
 cause_training_sp <- as(cause_training_spdf, "SpatialPoints")
+
+# ---------- join data 
+cause_join_spdf <- as(cause_join_sf, Class = "Spatial")
+cause_join_sp <- as(cause_join_spdf, "SpatialPoints")
 ```
 
 > NOTE: BEFORE creating `spdf` object; is where; filter to `year` etc. (user specifications)
+
+```{r}
+# === for satellite & historical data *join
+
+# --- count the no. of points in each `raster` `vic_raster_crop` cell
+ignition_join_rasterize <- raster::rasterize(x = cause_join_sp,
+                                             y = vic_raster_crop,
+                                             fun = "count",
+                                             background = 0) # set cells w. no fire ignitions to 0
+
+# ----- compute; in each grid cell
+# • `id`: id for cell (rowwise)
+# • `fire_count`: no. of points
+# • `fire_prop`: no. of points / total points (bushfire ignitions)
+# *returns matrix
+
+ignition_raster_values_join <- raster::getValues(ignition_join_rasterize) %>% 
+  tibble(fire_count = .) %>% 
+  mutate(id = 1:nrow(.), # cell id 
+         .before = fire_count) %>% 
+  mutate(fire_prop = fire_count / sum(fire_count)) %>% # no. of fire ignitions in a cell / total no. of fire ignitions
+  as.matrix() # turn intro matrix (each column = 1 layer in `RasterBrick`)
+
+vic_raster_crop_values_join <- raster::setValues(x = vic_raster_crop,
+                                                 values = ignition_raster_values_join)
+
+vic_raster_crop_values_join %>% 
+  plot()
+```
 
 
 ```{r}
@@ -388,30 +386,31 @@ cause_training_sp <- as(cause_training_spdf, "SpatialPoints")
 # predict_x *satellite data 
 ignition_rasterize <- raster::rasterize(x = cause_sp,# `SpatialPoints` object
                                         y = vic_raster_crop, # `Raster` object 
-                                        fun = "count") 
+                                        fun = "count",
+                                        background = 0) # set cells w. no fire ignitions to 0
 
 
 ignition_rasterize_training <- raster::rasterize(x = cause_training_sp,# `SpatialPoints` object
                                                  y = vic_raster_crop, # `Raster` object 
-                                                 fun = "count") 
+                                                 fun = "count",
+                                                 background = 0) # set cells w. no fire ignitions to 0
 
 # ----- compute; in each grid cell
+# • `id`: id for cell (rowwise
 # • `fire_count`: no. of points
 # • `fire_prop`: no. of points / total points (bushfire ignitions)
 
 # predict_x *satellite data 
 ignition_raster_values <- raster::getValues(ignition_rasterize) %>% # extract count values
   tibble(fire_count = .) %>% 
-  replace_na(list(fire_count = 0)) %>% # replace NA with 0 (no fire ignitions) 
   mutate(id = 1:nrow(.),
          .before = fire_count) %>% 
   mutate(fire_prop = fire_count / sum(fire_count)) %>% # no. of fire ignitions in a cell / total no. of fire ignitions
   as.matrix() # turn intro matrix (each column = 1 layer in `RasterBrick`)
 
-# `training` *historical data 
+# `training` *historical data
 ignition_raster_values_training <- raster::getValues(ignition_rasterize_training) %>% # extract count values
   tibble(fire_count = .) %>% 
-  replace_na(list(fire_count = 0)) %>% # replace NA with 0 (no fire ignitions) 
   # insert `id` column 
   mutate(id = 1:nrow(.),
          .before = fire_count) %>% 
@@ -470,13 +469,13 @@ vic_raster_crop_values_df %>%
   geom_dotplot(aes(x = factor(id),
                    y = fire_prop),
                binaxis = "y",
-               stackdir = "center",
+               stackdir = "up",
                position = "dodge",
                dotsize = 0.3) +
   geom_dotplot(aes(x = factor(id),
                    y = fire_prop),
                binaxis = "y",
-               stackdir = "center",
+               stackdir = "up",
                position = "dodge",
                dotsize = 0.3,
                fill = "red",
@@ -489,13 +488,408 @@ vic_raster_crop_values_df %>%
 ```
 
 
+# EDA plots
+
+## Frequency distribution for number of fires ignited
+
+> for each simulation; draw the no. of bushfires ignited per time period
+  - time period can be based on
+    - seasons (summer, autumn, winter, spring)
+    - year 
+    
+```{r}
+# --- frequency distribution; based on year & season
+freq_dist_year_season <- cause_join_df %>% 
+  filter(season %in% c("summer")) %>% 
+  count(year)
+```
+    
+
+### EDA plots: `cause` by `year` bar plot (temporal)
+```{r}
+# ---------- `predict_x` *satellite data
+
+# --- `cause` by `year`
+cause_join_df %>% 
+  group_by(year) %>% 
+  count(cause) %>% 
+  mutate(total = sum(n)) %>% 
+  ggplot() +
+  geom_col(aes(x = factor(year),
+               y = total)) +
+  geom_col(aes(x = factor(year),
+               y = n,
+               fill = cause)) +
+  facet_wrap(. ~ cause) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))
+
+
+# --- `cause` by `month`
+predict_x %>% 
+  group_by(month) %>% 
+  count(cause) %>% 
+  mutate(total = sum(n)) %>% 
+  ggplot() +
+  geom_col(aes(x = factor(month),
+               y = total)) +
+  geom_col(aes(x = factor(month),
+               y = n,
+               fill = cause)) +
+  facet_wrap(. ~ cause) +
+  theme_bw()
+```
+
+```{r}
+# ---------- `training_pred` *historical data
+cause_join_df %>% 
+  group_by(year) %>% 
+  count(cause) %>% 
+  mutate(total = sum(n)) %>% 
+  ggplot() +
+  geom_col(aes(x = factor(year),
+               y = total)) +
+  geom_col(aes(x = factor(year),
+               y = n,
+               fill = cause)) +
+  facet_wrap(. ~ cause) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))
+
+# --- `cause` by `month`
+training_pred %>% 
+  group_by(month) %>% 
+  count(cause) %>% 
+  mutate(total = sum(n)) %>% 
+  ggplot() +
+  geom_col(aes(x = factor(month),
+               y = total)) +
+  geom_col(aes(x = factor(month),
+               y = n,
+               fill = cause)) +
+  facet_wrap(. ~ cause) +
+  theme_bw()
+
+# --- total bushfire ignition; per year 
+training_pred %>% 
+  group_by(year) %>% 
+  count() %>% 
+  mutate(total = sum(n)) %>% 
+  ggplot() +
+  geom_col(aes(x = factor(year),
+               y = total)) +
+  geom_col(aes(x = factor(year),
+               y = n)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+## Simulation
+
+### Simulate ACROSS cells *for bushfire ignitions
+```{r}
+# ========== e.g. 1,000 simulation ==========
+# --- no. of fires; generated from uniform dist. 
+
+# --- create empty storage matrix 
+sim_count <- matrix(NA, 
+                    nrow = 0,
+                    ncol = 3)
+
+# --- run for loop: simulate random points (bushfire ignitions); in `raster` cell; return coordinates (matrix)
+for(i in 1:1000){
+  # simulate random points; in `raster` cells  
+  sim <- enmSdm::sampleRast(x = vic_raster_crop_values$fire_count, # `raster` object
+                            # *** draw no. of points; from frequency distribution *** 
+                            n = sample(freq_dist_year_season$n, 
+                                       size = 1), # 1 number
+                            replace = T, # w/o replacement
+                            prob = T) # sample cells with probabilities proportional to cell value (fire_count)
+  
+  # include 3rd column: simulation iteration number
+  sim <- cbind(sim, rep(i, nrow(sim)))
+  
+  # store results in `sim_count` 
+  sim_count <- rbind(sim_count, sim)
+}
+
+# create `SpatialPoints` object to store simulation points; 
+# so; able; `rasterize` (count no. of points in each cell)
+sim_count_sp <- sim_count %>% 
+  as_tibble() %>% 
+  rename(lon = x,
+         lat = y,
+         sim_id = V3) %>%
+  select(-sim_id) %>% # cannot have `sim_id` when `rasterize`
+  # convert to `sp` object
+  sp::SpatialPoints()
+
+# --- count number of points(bushfire ignitions); in each cell 
+sim_count_raster <- raster::rasterize(x = sim_count_sp,# `SpatialPoints` object
+                                      y = vic_raster_crop, # `Raster` object 
+                                      fun = "count") 
+
+# === plot simulation results
+
+# --- using `plot`
+sim_count_raster %>% 
+  plot()
+
+# --- using `tmap` 
+
+#  convert `raster` -> `spdf` -> `sf` object for plotting
+sim_count_raster_sf <- as(sim_count_raster, "SpatialPolygonsDataFrame") %>% 
+  sf::st_as_sf() %>% 
+  rename(fire_count = layer) %>% 
+  mutate(fire_count = fire_count / 1000) # divide `fire_count`; by no. of simulations
+  
+tmap::ttm() 
+
+tmap::tm_basemap(leaflet::providers$Esri.WorldTopoMap) +
+tmap::tm_shape(sim_count_raster_sf) + 
+  tmap::tm_polygons(col = "fire_count") +
+  # include outline of victoria map 
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 2)
+```
+> to fill in: frequency distribution; from which; number of bushfires occur 
+
+### Simulate WITHIN cell *potentially for bushfire spreads [WIP]
+
+> `ppp` objects; useful; simulate WITHIN cell
+
+```{r}
+# --- retreive coordinates of predicted bushfires; in matrix form
+coords_predict <- cause_sf %>% 
+  sf::st_coordinates()
+
+# window
+window <- spatstat.geom::owin(xrange = c(140.96168, 149.97629),
+        yrange = c(-39.13396, -33.99605))
+
+# --- create ppp object; of predicted pts. 
+predict_ppp <- spatstat.geom::ppp(x = coords_predict[,1],
+                                  y = coords_predict[,2],
+                                  window = window)
+
+# --- plot density
+plot(density(predict_ppp))
+
+# --- plot points
+plot(predict_ppp)
+```
+
+```{r}
+# --- get single rectangle resolution
+raster::res(vic_raster)
+
+# --- create window; for a grid cell
+window <- spatstat.geom::owin(xrange = c(0, 0.45),
+                              yrange = c(0, 0.26))
+
+# plot
+window %>% 
+  plot()
+
+# --- e.g. simulate bushfires; in a grid cell
+spatstat.core::rThomas(kappa = 50, # intensity of Poisson process of cluster centers = expected events; per unit area (no. of fires over the historical years / no. of years) *only 2019-2020 reliable spatially
+                       # * take hours into a/c
+                       
+                       scale = 1, # sd of random displacement (along each coordinate axis) of a pt. from its cluster centre
+                       
+                       mu = 3, # mean no. of points per cluster
+                       
+                       window = window) %>% # window (unit grid square)
+  plot()
+```
+
+ONE SIMULATION
+1. Simulate number of fires from a frequency distribution (based on historical no. of fires data)
+-> e.g. 5 fires
+
+2. simulate ignition locations; based on spatially probability weighted weighted grid cells 
+-> incorporate ignition rules 
+-> historical fire data
+
+*potentially simulate burning conditions for each individual simulated fire 
+-> based on weather variables// simulate the no. of days; fire burn (based on frequency distribution)
+=> gauge the fire spread 
+
+bushfire risk = no. of times cell burned / no. of simulations
+
+
+## deal with discrepancy between historical & satellite data
+
+> historical data; can be thought as: where 1st responder saw the fire 
+> hotspot data; detects ignition using satellite; able; detect ignitions in remote areas
+  - ∴ result in discrepancies; esp. in remote areas
+
+> goal: find a statistic; appropriately deal with the discrepency 
+
+### satellite (`predict_x`) against historical data (`training`)
+
+> compare agreeableness of 2018 historical data vs. 2019-2020 satellite hotspot data
+
+```{r}
+ignition_raster_values_df <- as_tibble(ignition_raster_values) %>% 
+  # select(-id) %>% 
+  mutate(data = "sattelite")
+
+ignition_raster_values_training_df <- as_tibble(ignition_raster_values_training) %>% 
+  # select(-id) %>% 
+  mutate(data = "historical")
+
+
+# --- plot `fire_count` of historical data against statellite data
+# examine agreeablenesss 
+ggplot() +
+  geom_text(aes(x = ignition_raster_values_df$fire_count,
+                y = ignition_raster_values_training_df$fire_count,
+                label = factor(1:400)), # id 1 to 400 
+            alpha = 0.6) +
+  theme_bw() +
+  labs(x = "satellite data",
+       y = "historical data")
+```
+
+```{r}
+ignition_raster_values_join <- as_tibble(ignition_raster_values_join) %>% 
+  # include historical - satellite fire ignitions in a cell
+  mutate(fire_count_diff = ignition_raster_values_training_df$fire_count - ignition_raster_values_df$fire_count) %>% # 
+  as.matrix() # turn intro matrix (each column = 1 layer in `RasterBrick`)
+
+# --- set values; to raster
+vic_raster_crop_values_join <- raster::setValues(x = vic_raster_crop,
+                                                 values = ignition_raster_values_join)
+
+# --- convert `raster` -> `spdf` -> `sf` for plotting with `tmap`
+# *sf polygons; allow popup of variable upon hover
+# `tm_raster` does not allow
+vic_crop_values_join_sp <- as(vic_raster_crop_values_join, "SpatialPolygonsDataFrame")
+vic_crop_values_join_sf <- sf::st_as_sf(vic_crop_values_join_sp) 
+
+# --- plot `sf` object; 
+p <- tmap::tm_shape(vic_crop_values_join_sf) +
+  tm_polygons(col = "fire_count_diff", # fill by historical - satellite fire ignitions; in grid cell
+              palette = "RdBu",
+              n = 7,
+              group = "fire_count_diff",
+              id = "id",
+              alpha = 0.3) +
+  # include Victoria map outline
+  tm_shape(vic_map_sf) +
+  tm_borders(lwd = 3)
+
+tmap::ttm() # set tmap mode; to from "plot" (static plot) => to interactive viewing "view"
+p
+```
+
+> blue: historical > satellite 
+> red: satellite > historical
+
+
+### historical data boxplots 
+
+```{r}
+extract_ignition_raster_values_training <- function(year){
+  
+  # --- count the number of points in each raster cell; via `raster::rasterize`  
+  
+  cause_training_sf <- cause_training_sf %>% 
+    filter(year == {{year}},
+           month %in% c(1, 2, 3, 10, 11, 12)) # same months as satellite data *bushfire season
+  
+  
+  cause_training_spdf <- as(cause_training_sf, Class = "Spatial")
+  cause_training_sp <- as(cause_training_spdf, "SpatialPoints")
+  
+  ignition_rasterize_training <- raster::rasterize(x = cause_training_sp,# `SpatialPoints` object
+                                                   y = vic_raster_crop, # `Raster` object 
+                                                   fun = "count",
+                                                   background = 0) # set cells w. no fire ignitions to 0
+  
+  # ----- compute; in each grid cell
+  # • `id`: id for cell (rowwise
+  # • `fire_count`: no. of points
+  # • `fire_prop`: no. of points / total points (bushfire ignitions)
+  
+  # `training` *historical data
+  ignition_raster_values_training <- raster::getValues(ignition_rasterize_training) %>% # extract count values
+    tibble(fire_count = .) %>% 
+    # insert `id` column 
+    mutate(id = 1:nrow(.),
+           year = year,
+           .before = fire_count) 
+  
+  return(ignition_raster_values_training)
+}
+
+ignition_raster_values_training_years <- purrr::map_df(.x = 2000:2018,
+                                                       .f = extract_ignition_raster_values_training) 
+
+# plot
+ignition_raster_values_training_years %>% 
+  ggplot() +
+  geom_point(aes(x = factor(year),
+                 y = fire_count)) +
+  facet_wrap(~ id,
+             nrow = 20,
+             ncol = 20) +
+  theme_bw()
+
+# --- filter to cells(`id`); where historical(2018) > satellite(2019-2020); by 20
+hist_gt_sat <- as_tibble(ignition_raster_values_join) %>% 
+  # include historical - satellite fire ignitions in a cell
+  mutate(fire_count_diff = ignition_raster_values_training_df$fire_count - ignition_raster_values_df$fire_count) %>% 
+  filter(fire_count_diff > 20) %>% 
+  pull(id)
+
+ignition_raster_values_training_years %>% 
+  filter(id %in% hist_gt_sat) %>% 
+  ggplot() +
+  geom_point(aes(x = factor(year),
+                 y = fire_count)) +
+  facet_wrap(~ id) +
+  theme_bw()
+  
+# --- filter to cells(`id`); where satellite(2019-2020) > historical(2018); by 20
+sat_gt_hist <- as_tibble(ignition_raster_values_join) %>% 
+  # include historical - satellite fire ignitions in a cell
+  mutate(fire_count_diff = ignition_raster_values_training_df$fire_count - ignition_raster_values_df$fire_count) %>% 
+  filter(fire_count_diff < -15) %>% 
+  pull(id)
+
+ignition_raster_values_training_years %>% 
+  filter(id %in% sat_gt_hist) %>% 
+  ggplot() +
+  geom_point(aes(x = factor(year),
+                 y = fire_count)) +
+  facet_wrap(~ id) +
+  theme_bw()
+```
+
+> see in conjunection with map above! 
+
+> for cells; with historical ignitions > satellite ignitions
+  - there seem to be a spike in historical data ignitions; from 2014 onwards; to 2018; as compared to previous years
+  - 2018 showed a significant increase in fire ignitions compared to all other years; for all cells
+
+> cell 208: outlier 
+  - has more ignitions; in early years
+
+> ???could it be; data; more consistently recorded; in later years?
+  
+> for cells with satellite ignitions > historical ignitions
+  - in the South East; there were still counts in historical data; although minimal (fluctuate from 5-10 mostly) *close to roads (supposedly; caused by accidents rather than lightning)
+  - in SouthWest; interesting that very few fires were ignited; in historical data; but many captured on satellite data 
+
 # Final map (in app) [WIP]
 ```{r}
 # ========== FINAL MAP (in app) *to be made interactive ==========
 
 # === for `predict_x` *satellite data
 # --- vic_raster (where risk prediction lies)
-final_map <- tmap::tm_shape(vic_raster_crop_values) +
+final_map <- tmap::tm_shape(vic_raster_crop_values$fire_count) +
   tmap::tm_raster(title = "bushfire risk predictions",
                   style = "cont",
                   palette = "YlOrRd",
@@ -511,7 +905,6 @@ final_map <- tmap::tm_shape(vic_raster_crop_values) +
   tmap::tm_bubbles(col = "cause",
                    size = 0.3,
                    alpha = 0.5) +
-  
   # --- themes
   tmap::tm_layout(legend.outside = T)
 
@@ -549,60 +942,6 @@ final_map <- tmap::tm_shape(vic_raster_crop_values_training) +
 tmap::ttm() # set tmap mode; to from "plot" (static plot) => to interactive viewing "view"
 final_map
 ```
-
-
-# simulation [WIP]
-```{r}
-# --- get single rectangle resolution
-raster::res(vic_raster)
-
-# --- create window; for a grid cell
-window <- spatstat.geom::owin(xrange = c(0, 0.45),
-                              yrange = c(0, 0.26))
-
-# plot
-window %>% 
-  plot()
-
-# --- e.g. simulate bushfires; in a grid cell
-spatstat.core::rThomas(kappa = 50, # intensity of Poisson process of cluster centers = expected events; per unit area (no. of fires over the historical years / no. of years) *only 2019-2020 reliable spatially
-                       # * take hours into a/c
-                       
-                       scale = 1, # sd of random displacement (along each coordinate axis) of a pt. from its cluster centre
-                       
-                       mu = 3, # mean no. of points per cluster
-                       
-                       window = window) %>% # window (unit grid square)
-  plot()
-```
-
-# EDA plots
-
-## ppp object [WIP]
-```{r}
-# --- retreive coordinates of predicted bushfires; in matrix form
-coords_predict <- cause_sf %>% 
-  sf::st_coordinates()
-
-# window
-window <- spatstat.geom::owin(xrange = c(140.96168, 149.97629),
-        yrange = c(-39.13396, -33.99605))
-
-# --- create ppp object; of predicted pts. 
-predict_ppp <- spatstat.geom::ppp(x = coords_predict[,1],
-                                  y = coords_predict[,2],
-                                  window = window)
-
-
-# --- plot density
-plot(density(predict_ppp))
-
-# --- plot points
-plot(predict_ppp)
-```
-
-
-
 
 
 
