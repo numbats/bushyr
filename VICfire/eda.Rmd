@@ -511,11 +511,13 @@ freq_dist_year_season <- cause_join_df %>%
 
 # --- `cause` by `year`
 cause_join_df %>% 
+  filter(month %in% c(1,2,3,10,11,12)) %>% 
   group_by(year) %>% 
   count(cause) %>% 
   mutate(total = sum(n)) %>% 
   ggplot() +
-  geom_col(aes(x = factor(year),
+  geom_col(aes(x = factor(year,
+                          levels = c(2000:2020)),
                y = total)) +
   geom_col(aes(x = factor(year),
                y = n,
@@ -527,6 +529,7 @@ cause_join_df %>%
 
 # --- `cause` by `month`
 predict_x %>% 
+  filter(month %in% c(1,2,3,10,11,12)) %>%
   group_by(month) %>% 
   count(cause) %>% 
   mutate(total = sum(n)) %>% 
@@ -538,50 +541,6 @@ predict_x %>%
                fill = cause)) +
   facet_wrap(. ~ cause) +
   theme_bw()
-```
-
-```{r}
-# ---------- `training_pred` *historical data
-cause_join_df %>% 
-  group_by(year) %>% 
-  count(cause) %>% 
-  mutate(total = sum(n)) %>% 
-  ggplot() +
-  geom_col(aes(x = factor(year),
-               y = total)) +
-  geom_col(aes(x = factor(year),
-               y = n,
-               fill = cause)) +
-  facet_wrap(. ~ cause) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90))
-
-# --- `cause` by `month`
-training_pred %>% 
-  group_by(month) %>% 
-  count(cause) %>% 
-  mutate(total = sum(n)) %>% 
-  ggplot() +
-  geom_col(aes(x = factor(month),
-               y = total)) +
-  geom_col(aes(x = factor(month),
-               y = n,
-               fill = cause)) +
-  facet_wrap(. ~ cause) +
-  theme_bw()
-
-# --- total bushfire ignition; per year 
-training_pred %>% 
-  group_by(year) %>% 
-  count() %>% 
-  mutate(total = sum(n)) %>% 
-  ggplot() +
-  geom_col(aes(x = factor(year),
-               y = total)) +
-  geom_col(aes(x = factor(year),
-               y = n)) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90))
 ```
 
 ## Simulation
@@ -780,7 +739,7 @@ p <- tmap::tm_shape(vic_crop_values_join_sf) +
   tm_shape(vic_map_sf) +
   tm_borders(lwd = 3)
 
-tmap::ttm() # set tmap mode; to from "plot" (static plot) => to interactive viewing "view"
+# tmap::ttm() # set tmap mode; to from "plot" (static plot) => to interactive viewing "view"
 p
 ```
 
@@ -835,7 +794,8 @@ ignition_raster_values_training_years %>%
   facet_wrap(~ id,
              nrow = 20,
              ncol = 20) +
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))
 
 # --- filter to cells(`id`); where historical(2018) > satellite(2019-2020); by 20
 hist_gt_sat <- as_tibble(ignition_raster_values_join) %>% 
@@ -870,12 +830,15 @@ ignition_raster_values_training_years %>%
 
 > see in conjunection with map above! 
 
+> many cells; do not have fires historically 
+
 > for cells; with historical ignitions > satellite ignitions
   - there seem to be a spike in historical data ignitions; from 2014 onwards; to 2018; as compared to previous years
   - 2018 showed a significant increase in fire ignitions compared to all other years; for all cells
 
 > cell 208: outlier 
   - has more ignitions; in early years
+  .˙. remove from counts
 
 > ???could it be; data; more consistently recorded; in later years?
   
@@ -883,33 +846,49 @@ ignition_raster_values_training_years %>%
   - in the South East; there were still counts in historical data; although minimal (fluctuate from 5-10 mostly) *close to roads (supposedly; caused by accidents rather than lightning)
   - in SouthWest; interesting that very few fires were ignited; in historical data; but many captured on satellite data 
 
-# Final map (in app) [WIP]
+> seems like; smth. to do with watchtowers 
+
+
+### comparing maps of historical vs. satellite data *location
 ```{r}
-# ========== FINAL MAP (in app) *to be made interactive ==========
+# --- function; extract `sf` polygon; for each grid cell; to facet by `year`
 
-# === for `predict_x` *satellite data
-# --- vic_raster (where risk prediction lies)
-final_map <- tmap::tm_shape(vic_raster_crop_values$fire_count) +
-  tmap::tm_raster(title = "bushfire risk predictions",
-                  style = "cont",
-                  palette = "YlOrRd",
-                  n = 5, # no. of colours 
-                  alpha = 0.4) + 
+extract_ignition_raster_values_training2 <- function(year){
   
-  # --- vic_map_sf (draw outline of Victoria )
-  tmap::tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) + # border line width 
+  # --- count the number of points in each raster cell; via `raster::rasterize`  
+  cause_training_sf <- cause_training_sf %>% 
+    filter(year == {{year}},
+           month %in% c(1, 2, 3, 10, 11, 12)) # same months as satellite data *bushfire season
   
-  # --- draw prediction points (to buffer as necessary)
-  tmap::tm_shape(cause_sf) +
-  tmap::tm_bubbles(col = "cause",
-                   size = 0.3,
-                   alpha = 0.5) +
-  # --- themes
-  tmap::tm_layout(legend.outside = T)
+  
+  cause_training_spdf <- as(cause_training_sf, Class = "Spatial")
+  cause_training_sp <- as(cause_training_spdf, "SpatialPoints")
+  
+  ignition_rasterize_training <- raster::rasterize(x = cause_training_sp,# `SpatialPoints` object
+                                                   y = vic_raster_crop, # `Raster` object 
+                                                   fun = "count",
+                                                   background = 0) # set cells w. no fire ignitions to 0
+  
+  # ----- compute; in each grid cell
+  # • `fire_count`: no. of points
+  # • `fire_prop`: no. of points / total points (bushfire ignitions)
+  
+   ignition_rasterize_training_sp <- as(ignition_rasterize_training, "SpatialPolygonsDataFrame")
+   
+   ignition_rasterize_training_sf <- sf::st_as_sf(ignition_rasterize_training_sp) %>%
+     rename(fire_count = layer) %>% 
+     mutate(id = 1:400, # add id column; for each raster cel id 
+            year = {{year}}) # include `year` column
+   
+   return(ignition_rasterize_training_sf)
+}
 
-tmap::ttm() # set tmap mode; to from "plot" (static plot) => to interactive viewing "view"
-final_map
+# --- extract list of `sf` polygons; for year 2000 to 2018
+ignition_rasterize_training_sf <- purrr::map(.x = 2000:2018,
+                                             .f = extract_ignition_raster_values_training2)
+
+# --- bind list of `sf` polygon objects into 1
+ignition_rasterize_training_sf <- dplyr::bind_rows(ignition_rasterize_training_sf)
 ```
 
 
@@ -918,8 +897,142 @@ final_map
 
 # === for `training` *historical data
 # --- vic_raster (where risk prediction lies)
+hist_map_facet_year <- tmap::tm_shape(ignition_rasterize_training_sf) +
+  tmap::tm_polygons(col = "fire_count",
+                    id = "id",
+                    style = "cont",
+                    palette = "YlOrRd",
+                    n = 5, # no. of colours 
+                    alpha = 0.4,
+                    legend.show = F) + 
+  tmap::tm_facets(by = "year") + 
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- add ignition points (to buffer as necessary)
+  tmap::tm_shape(cause_training_sf) +
+  tmap::tm_bubbles(col = "cause",
+                   size = 0.3,
+                   alpha = 0.1) +
+  tmap::tm_facets(by = "year") +
+  # --- themes
+  tmap::tm_layout(legend.show = F)
 
-final_map <- tmap::tm_shape(vic_raster_crop_values_training) +
+
+tmap::ttm() # set tmap mode; to from "plot" (static plot) => to interactive viewing "view"
+hist_map_facet_year
+```
+
+```{r}
+sat_map_facet_year <- tmap::tm_shape(vic_raster_crop_values$fire_count) +
+  tmap::tm_raster(title = "",
+                  style = "cont",
+                  palette = "YlOrRd",
+                  n = 5, # no. of colours 
+                  alpha = 0.4) + 
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- draw prediction points (to buffer as necessary)
+  tmap::tm_shape(cause_sf) +
+  tmap::tm_bubbles(col = "cause",
+                   size = 0.3,
+                   alpha = 0.1) +
+  tmap::tm_facets(by = "year") +
+  # --- themes
+  tmap::tm_layout(legend.show = T)
+
+sat_map_facet_year
+```
+
+
+### comparing historical vs. satellite: plot `cause` by `year` bar plot 
+```{r}
+# ---------- `predict_x` *satellite data
+
+# --- `cause` by `year`
+cause_join_df %>% 
+  filter(month %in% c(1,2,3,10,11,12)) %>% 
+  group_by(year) %>% 
+  count(cause) %>% 
+  mutate(total = sum(n)) %>% 
+  ggplot() +
+  geom_col(aes(x = factor(year,
+                          levels = c(2000:2020)),
+               y = total)) +
+  geom_col(aes(x = factor(year),
+               y = n,
+               fill = cause)) +
+  facet_wrap(. ~ cause) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+> the large discrepancy in historical & satellite data; probably due to; significant increase in `accident` ignitions; from 2014 to 2018  
+
+
+
+```{r}
+# --- `cause` by `month`
+cause_join_df %>% 
+  filter(month %in% c(1,2,3,10,11,12)) %>%
+  group_by(month) %>% 
+  count(cause) %>% 
+  mutate(total = sum(n)) %>% 
+  ggplot() +
+  geom_col(aes(x = factor(month),
+               y = total)) +
+  geom_col(aes(x = factor(month),
+               y = n,
+               fill = cause)) +
+  facet_wrap(. ~ cause) +
+  theme_bw()
+```
+
+
+
+# Final map (in app) [WIP]
+```{r}
+# ========== FINAL MAP (in app) *to be made interactive ==========
+
+# === for `predict_x` *satellite data
+# --- vic_raster (where risk prediction lies)
+final_map <- tmap::tm_shape(vic_raster_crop_values_training$fire_count) +
+  tmap::tm_raster(title = "bushfire risk predictions",
+                  style = "cont",
+                  palette = "YlOrRd",
+                  n = 5, # no. of colours 
+                  alpha = 0.4) + 
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- draw prediction points (to buffer as necessary)
+  tmap::tm_shape(cause_training_sf) +
+  tmap::tm_bubbles(col = "cause",
+                   size = 0.3,
+                   alpha = 0.3) +
+  tmap::tm_facets(by = "year") +
+  # --- themes
+  tmap::tm_layout(legend.outside = T)
+
+tmap::ttm() # set tmap mode; to from "plot" (static plot) => to interactive viewing "view"
+final_map
+```
+
+
+```{r, eval=FALSE}
+# ========== FINAL MAP (in app) *to be made interactive ==========
+
+# === for `training` *historical data
+# --- vic_raster (where risk prediction lies)
+
+final_map <- tmap::tm_shape(vic_raster_crop_values_join) +
   tmap::tm_raster(title = "bushfire risk predictions",
                   style = "cont",
                   palette = "YlOrRd",
@@ -939,7 +1052,7 @@ final_map <- tmap::tm_shape(vic_raster_crop_values_training) +
   # --- themes
   tmap::tm_layout(legend.outside = T)
 
-tmap::ttm() # set tmap mode; to from "plot" (static plot) => to interactive viewing "view"
+# tmap::ttm() # set tmap mode; to from "plot" (static plot) => to interactive viewing "view"
 final_map
 ```
 
