@@ -249,7 +249,8 @@ cluster_16_21_df <- cbind(cluster_16_21_df, bf_season) %>%
   group_by(bf_season) %>% 
   # add bushfire season column
   mutate(bf_season = paste0(min(year), "-", min(year + 1))) %>% 
-  mutate(bf_season = factor(bf_season))
+  mutate(bf_season = factor(bf_season)) %>% 
+  ungroup()
 ```
 
 ```{r}
@@ -509,60 +510,6 @@ vic_raster_crop_values_training %>%
 ```
 
 > `training` (historical data) & `predict_x` (satellite data); very different in terms of where fire ignited 
-
-```{r}
-# --- side-by-side dot plot
-vic_raster_crop_values_df <- vic_raster_crop_values %>% 
-  raster::getValues() %>% 
-  as_tibble() 
-
-# `fire_count`
-vic_raster_crop_values_df %>% 
-  ggplot() +
-  geom_dotplot(aes(x = factor(id),
-                   y = fire_count),
-               binaxis = "y",
-               stackdir = "center",
-               position = "dodge",
-               dotsize = 0.3) +
-  geom_dotplot(aes(x = factor(id),
-                   y = fire_count),
-               binaxis = "y",
-               stackdir = "center",
-               position = "dodge",
-               dotsize = 0.3,
-               fill = "red",
-               data = filter(vic_raster_crop_values_df, fire_count != 0)) + 
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90,
-                                   size = 8)) +
-  labs(x = "Cell ID",
-       y = "Fire Count")
-
-# `fire_prop`
-vic_raster_crop_values_df %>% 
-  ggplot() +
-  geom_dotplot(aes(x = factor(id),
-                   y = fire_prop),
-               binaxis = "y",
-               stackdir = "up",
-               position = "dodge",
-               dotsize = 0.3) +
-  geom_dotplot(aes(x = factor(id),
-                   y = fire_prop),
-               binaxis = "y",
-               stackdir = "up",
-               position = "dodge",
-               dotsize = 0.3,
-               fill = "red",
-               data = filter(vic_raster_crop_values_df, fire_prop != 0)) + 
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90,
-                                   size = 8)) +
-  labs(x = "Cell ID",
-       y = "Fire proportion")
-```
-
 
 # EDA plots
 
@@ -839,7 +786,7 @@ p
 > blue: historical > satellite 
 > red: satellite > historical
 
-### historical data boxplots 
+### historical data dot plots  
 
 #### by year
 ```{r}
@@ -948,7 +895,7 @@ ignition_raster_values_training_years %>%
 > seems like; smth. to do with watchtowers 
 
 #### by bushfire season
-```{r, eval=FALSE}
+```{r}
 # --- create funciton; count; no. of points in each raster cell; via raster::rasterize; for each year 
 extract_ignition_raster_values_bf_season <- function(data, bf_season){
   
@@ -981,11 +928,10 @@ extract_ignition_raster_values_bf_season <- function(data, bf_season){
   
   return(ignition_raster_values)
 }
+```
 
-
-extract_ignition_raster_values_bf_season(cause_training_sf,
-                                         unique(cause_training_sf$bf_season[1]))
-
+```{r}
+# ============ For training data ============
 ignition_raster_values_training_bf_season <- purrr::map_df(.x = unique(cause_training_sf$bf_season),
                                                        .f = ~extract_ignition_raster_values_bf_season(cause_training_sf, .x)) 
 
@@ -1003,7 +949,41 @@ p1
 # plotly::ggplotly(p1)
 ```
 
+```{r}
+# ============ for satellite data; 2016 - 2021 ============
+ignition_raster_values_cluster_bf_season <- purrr::map_df(.x = unique(cluster_16_21_sf$bf_season),
+                                                       .f = ~extract_ignition_raster_values_bf_season(cluster_16_21_sf, .x)) 
 
+p1 <- ignition_raster_values_cluster_bf_season %>% 
+  ggplot() +
+  geom_point(aes(x = factor(bf_season),
+                 y = fire_count)) +
+  facet_wrap(~ id,
+             nrow = 20,
+             ncol = 20) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) 
+p1
+```
+
+```{r}
+# --- join both data
+ignition_raster_values_join_bf_season <- inner_join(ignition_raster_values_cluster_bf_season, ignition_raster_values_training_bf_season,
+           by = c("bf_season", "id")) %>% 
+  rename(fire_count_sat = fire_count.x,
+         fire_count_hist = fire_count.y)
+
+p <-ignition_raster_values_join_bf_season %>% 
+  ggplot() +
+  geom_text(aes(x = fire_count_sat,
+                y = fire_count_hist,
+                label = id)) +
+  facet_wrap(~ bf_season,
+             nrow = 3) +
+  theme_bw() 
+  
+plotly::ggplotly(p)
+```
 
 
 ### comparing maps of historical vs. satellite data *spatial
@@ -1214,7 +1194,10 @@ extract_ignition_raster_values_sf_bf_season <- function(data, bf_season){ # data
    
    return(ignition_rasterize_training_sf)
 }
+```
 
+```{r}
+# ========== for `training` *historical data ==========
 
 # --- extract list of `sf` polygons; for year 2000 to 2018
 ignition_rasterize_training_sf_bf_season <- purrr::map(.x = unique(cause_training_sf$bf_season),
@@ -1222,12 +1205,10 @@ ignition_rasterize_training_sf_bf_season <- purrr::map(.x = unique(cause_trainin
 
 # --- bind list of `sf` polygon objects into 1 df
 ignition_rasterize_training_sf_bf_season <- dplyr::bind_rows(ignition_rasterize_training_sf_bf_season)
-```
 
-```{r}
-# === for `training` *historical data
-# --- vic_raster (where risk prediction lies)
+# --- plot results; (where risk prediction lies)
 hist_map_facet_bf_season <- tmap::tm_shape(ignition_rasterize_training_sf_bf_season) +
+  # --- cells; filled with no. of `fire_count`
   tmap::tm_polygons(col = "fire_count",
                     id = "id",
                     style = "cont",
@@ -1236,7 +1217,8 @@ hist_map_facet_bf_season <- tmap::tm_shape(ignition_rasterize_training_sf_bf_sea
                     alpha = 0.4,
                     legend.show = F) + 
   
-  tmap::tm_facets(by = "bf_season") + 
+  tmap::tm_facets(by = "bf_season",
+                  ncol = 3) + 
   
   # --- vic_map_sf (draw outline of Victoria )
   tmap::tm_shape(vic_map_sf) +
@@ -1247,7 +1229,8 @@ hist_map_facet_bf_season <- tmap::tm_shape(ignition_rasterize_training_sf_bf_sea
   tmap::tm_bubbles(col = "cause",
                    size = 0.3,
                    alpha = 0.1) +
-  tmap::tm_facets(by = "bf_season") +
+  tmap::tm_facets(by = "bf_season",
+                  ncol = 3) +
   # --- themes
   tmap::tm_layout(legend.show = F)
 
@@ -1257,7 +1240,7 @@ hist_map_facet_bf_season
 ```
 
 ```{r}
-# === for satellite data; 2016-2021
+# ========== for satellite data; 2016-2021 ==========
 
 # --- extract list of `sf` polygons; for year 2000 to 2018
 ignition_rasterize_cluster_sf_bf_season <- purrr::map(.x = unique(cluster_16_21_sf$bf_season),
@@ -1265,9 +1248,9 @@ ignition_rasterize_cluster_sf_bf_season <- purrr::map(.x = unique(cluster_16_21_
 
 # --- bind list of `sf` polygon objects into 1 df
 ignition_rasterize_cluster_bf_season <- dplyr::bind_rows(ignition_rasterize_cluster_sf_bf_season)
-```
 
-```{r}
+
+# === plot results 
 cluster_map_facet_bf_season <- tmap::tm_shape(ignition_rasterize_cluster_bf_season) +
   tmap::tm_polygons(col = "fire_count",
                     id = "id",
@@ -1279,16 +1262,18 @@ cluster_map_facet_bf_season <- tmap::tm_shape(ignition_rasterize_cluster_bf_seas
   
   tmap::tm_facets(by = "bf_season") + 
   
-  # --- vic_map_sf (draw outline of Victoria )
-  tmap::tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) + # border line width 
-  
   # --- add ignition points (to buffer as necessary)
   tmap::tm_shape(cluster_16_21_sf) +
   tmap::tm_bubbles(# col = "cause",
                    size = 0.3,
-                   alpha = 0.1) +
+                   alpha = 0.1,
+                   id = "") +
   tmap::tm_facets(by = "bf_season") +
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
   # --- themes
   tmap::tm_layout(legend.show = F)
 
@@ -1297,35 +1282,85 @@ cluster_map_facet_bf_season
 
 
 ### comparing historical vs. satellite: plot `cause` by `year` bar plot 
-```{r}
-# ---------- `predict_x` *satellite data
 
-# --- `cause` by `year`
-cause_join_df %>% 
-  filter(month %in% c(1,2,3,10,11,12)) %>% 
-  group_by(year) %>% 
+#### by bushfire season
+```{r}
+# === 2019-2020: satellite data
+# === 2000:2019: historical data 
+
+# --- `cause` by `bf_season`
+cause_join_count_bf_season <- cause_join_df %>% 
+  filter(!is.na(bf_season)) %>% 
+  group_by(bf_season) %>% 
   count(cause) %>% 
   mutate(total = sum(n)) %>% 
+  ungroup() 
+
+cause_join_count_bf_season %>% 
   ggplot() +
-  geom_col(aes(x = factor(year,
-                          levels = c(2000:2020)),
+  geom_col(aes(x = factor(bf_season),
                y = total)) +
-  geom_col(aes(x = factor(year),
+  geom_col(aes(x = factor(bf_season),
                y = n,
                fill = cause)) +
   facet_wrap(. ~ cause) +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 90))
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "historical data 2000-2019// sat. data 2019-2020",
+       x = "bushfire season",
+       y = "number of ignitions")
+
+# === cluster data
+cluster_16_21_count_bf_season <- cluster_16_21_df %>% 
+  filter(!is.na(bf_season)) %>% 
+  group_by(bf_season) %>% 
+  count() %>% 
+  ungroup()  
+  # mutate(total = sum(n)) *no `cause`
+  
+cluster_16_21_count_bf_season %>% 
+  ggplot() +
+  geom_col(aes(x = factor(bf_season),
+               y = n)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "satellite data",
+       x = "bushfire season",
+       y = "number of ignitions")
 ```
 
 > the large discrepancy in historical & satellite data; probably due to; significant increase in `accident` ignitions; from 2014 to 2018  
 
+```{r}
+cause_join_count_bf_season %>% 
+  filter(bf_season %in% unique(cluster_16_21_count_bf_season$bf_season)) %>% 
+  select(bf_season, total) %>% 
+  # join cluster & join data counts
+  right_join(cluster_16_21_count_bf_season,
+            by = "bf_season") %>% 
+  rename(total_join = total,
+         total_cluster = n) %>% # fire ignitions; in clustering data (2016-2021)
+  distinct(bf_season,
+           .keep_all = T) %>% 
+  pivot_longer(cols = total_join:total_cluster,
+               names_to = "data", # in join (historical(2000-2019) & sat(2019-2020))// cluster(2016-2021)
+               values_to = "n") %>% # no. of fire ignitions
+  ggplot() +
+  geom_col(aes(x = bf_season,
+               y = n,
+               fill = data),
+           position = "dodge") +
+  colorspace::scale_fill_discrete_qualitative() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90))
+```
 
+> large discrepancy; 2017 - 2018 
 
 ```{r}
 # --- `cause` by `month`
 cause_join_df %>% 
-  # filter(month %in% c(1,2,3,10,11,12)) %>%
+  # filter(bf_season %in% unique(cluster_16_21_df$bf_season))
   group_by(month) %>% 
   count(cause) %>% 
   mutate(total = sum(n)) %>% 
@@ -1337,15 +1372,39 @@ cause_join_df %>%
                fill = cause)) +
   facet_wrap(. ~ cause) +
   theme_bw()
+
+cause_join_count_month <- cause_join_df %>% 
+  filter(bf_season %in% unique(cluster_16_21_df$bf_season)) %>% 
+  group_by(bf_season, month) %>% 
+  count() %>% 
+  ungroup()
+
+cluster_16_21_count_month <- cluster_16_21_df %>% 
+  group_by(month, bf_season) %>% 
+  count() %>% 
+  ungroup()
+
+setdiff(cluster_16_21_count_month$bf_season, cause_join_count_month$bf_season)
+
+left_join(cluster_16_21_count_month, cause_join_count_month,
+          by = c("bf_season", "month")) %>% 
+  rename(total_cluster = n.x,
+         total_join = n.y) %>% 
+  pivot_longer(cols = total_cluster:total_join,
+               names_to = "data",
+               values_to = "n") %>% 
+  ggplot() +
+  geom_col(aes(x = factor(month,
+                          levels = c(10, 11, 12, 1, 2, 3)),
+               y = n,
+               fill = data),
+           position = "dodge") +
+  facet_wrap(. ~ bf_season) + 
+  colorspace::scale_fill_discrete_qualitative()
 ```
 
-
-
-- 2016; missing months 10, 11, 12
-- clustering data; no weather variables
-
-
-
+> missing data; join data 2019: 1, 2, 3
+  - i.e. 2019 1, 2, 3 data 
 
 
 # Final map (in app) [WIP]
