@@ -1,0 +1,106 @@
+File /Users/brenwin/Desktop/bushyr-main/VICfire/data/era5/era5.nc (NC_FORMAT_64BIT):
+
+     12 variables (excluding dimension variables):
+        short si10[longitude,latitude,expver,time]   
+            scale_factor: 0.000152639974313804
+            add_offset: 6.18737838048281
+            _FillValue: -32767
+            missing_value: -32767
+            units: m s**-1
+            long_name: 10 metre wind speed
+        short d2m[longitude,latitude,expver,time]   
+            scale_factor: 0.000304310542970717
+            add_offset: 281.616058782228
+            _FillValue: -32767
+            missing_value: -32767
+            units: K
+            long_name: 2 metre dewpoint temperature
+        short t2m[longitude,latitude,expver,time]   
+            scale_factor: 0.00045293407758305
+            add_offset: 289.461199314211
+            _FillValue: -32767
+            missing_value: -32767
+            units: K
+            long_name: 2 metre temperature
+        short cvh[longitude,latitude,expver,time]   
+            scale_factor: 1.52594875864068e-05
+            add_offset: 0.499992370256207
+            _FillValue: -32767
+            missing_value: -32767
+            units: (0 - 1)
+            long_name: High vegetation cover
+        short lai_hv[longitude,latitude,expver,time]   
+            scale_factor: 8.7874307481536e-05
+            add_offset: 2.87928955894001
+            _FillValue: -32767
+            missing_value: -32767
+            units: m**2 m**-2
+            long_name: Leaf area index, high vegetation
+        short lai_lv[longitude,latitude,expver,time]   
+            scale_factor: 4.67806117242458e-05
+            add_offset: 1.53281352375664
+            _FillValue: -32767
+            missing_value: -32767
+            units: m**2 m**-2
+            long_name: Leaf area index, low vegetation
+        short cvl[longitude,latitude,expver,time]   
+            scale_factor: 1.52594875864068e-05
+            add_offset: 0.499992370256207
+            _FillValue: -32767
+            missing_value: -32767
+            units: (0 - 1)
+            long_name: Low vegetation cover
+        short slt[longitude,latitude,expver,time]   
+            scale_factor: 6.10379503456274e-05
+            add_offset: 1.99996948102483
+            _FillValue: -32767
+            missing_value: -32767
+            units: ~
+            long_name: Soil type
+        short ssr[longitude,latitude,expver,time]   
+            scale_factor: 345.191720202036
+            add_offset: 15469358.9041399
+            _FillValue: -32767
+            missing_value: -32767
+            units: J m**-2
+            long_name: Surface net solar radiation
+            standard_name: surface_net_downward_shortwave_flux
+        short tp[longitude,latitude,expver,time]   
+            scale_factor: 1.50078153307919e-07
+            add_offset: 0.00492467014752281
+            _FillValue: -32767
+            missing_value: -32767
+            units: m
+            long_name: Total precipitation
+        short tvh[longitude,latitude,expver,time]   
+            scale_factor: 0.00028993026414173
+            add_offset: 9.49985503486793
+            _FillValue: -32767
+            missing_value: -32767
+            units: ~
+            long_name: Type of high vegetation
+        short tvl[longitude,latitude,expver,time]   
+            scale_factor: 0.000259411288968916
+            add_offset: 8.49987029435552
+            _FillValue: -32767
+            missing_value: -32767
+            units: ~
+            long_name: Type of low vegetation
+
+     4 dimensions:
+        longitude  Size:37
+            units: degrees_east
+            long_name: longitude
+        latitude  Size:21
+            units: degrees_north
+            long_name: latitude
+        expver  Size:2
+            long_name: expver
+        time  Size:69
+            units: hours since 1900-01-01 00:00:00.0
+            long_name: time
+            calendar: gregorian
+
+    2 global attributes:
+        Conventions: CF-1.6
+        history: 2021-10-19 12:34:25 GMT by grib_to_netcdf-2.23.0: /opt/ecmwf/mars-client/bin/grib_to_netcdf -S param -o /cache/data0/adaptor.mars.internal-1634646863.8722668-7013-5-c3659084-1efa-4469-adc2-b83b67159c45.nc /cache/tmp/c3659084-1efa-4469-adc2-b83b67159c45-adaptor.mars.internal-1634646784.9006307-7013-1-tmp.grib

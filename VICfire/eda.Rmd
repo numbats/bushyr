@@ -16,6 +16,7 @@ library(raster)
 library(sf)
 library(sp)
 library(spatstat)
+library(patchwork)
 ```
 
 # read in data
@@ -824,6 +825,7 @@ extract_ignition_raster_values_year <- function(data, year){
   return(ignition_raster_values)
 }
 
+# --- apply function; from year 2000 to 2018
 ignition_raster_values_training_years <- purrr::map_df(.x = 2000:2018,
                                                        .f = ~extract_ignition_raster_values_year(cause_training_sf, .x)) 
 
@@ -1207,14 +1209,20 @@ ignition_rasterize_training_sf_bf_season <- purrr::map(.x = unique(cause_trainin
 ignition_rasterize_training_sf_bf_season <- dplyr::bind_rows(ignition_rasterize_training_sf_bf_season)
 
 # --- plot results; (where risk prediction lies)
-hist_map_facet_bf_season <- tmap::tm_shape(ignition_rasterize_training_sf_bf_season) +
+hist_map_facet_bf_season <- ignition_rasterize_training_sf_bf_season %>% 
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count
+  )) %>% 
+  tmap::tm_shape() +
   # --- cells; filled with no. of `fire_count`
   tmap::tm_polygons(col = "fire_count",
                     id = "id",
-                    style = "cont",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
                     palette = "YlOrRd",
-                    n = 5, # no. of colours 
                     alpha = 0.4,
+                    colorNA = "grey",
                     legend.show = F) + 
   
   tmap::tm_facets(by = "bf_season",
@@ -1251,13 +1259,18 @@ ignition_rasterize_cluster_bf_season <- dplyr::bind_rows(ignition_rasterize_clus
 
 
 # === plot results 
-cluster_map_facet_bf_season <- tmap::tm_shape(ignition_rasterize_cluster_bf_season) +
+cluster_map_facet_bf_season <- ignition_rasterize_cluster_bf_season %>% 
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count)) %>% 
+  tmap::tm_shape() +
   tmap::tm_polygons(col = "fire_count",
                     id = "id",
-                    style = "cont",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
                     palette = "YlOrRd",
-                    n = 5, # no. of colours 
                     alpha = 0.4,
+                    colourNA = "grey",
                     legend.show = F) + 
   
   tmap::tm_facets(by = "bf_season") + 
@@ -1294,19 +1307,23 @@ cause_join_count_bf_season <- cause_join_df %>%
   group_by(bf_season) %>% 
   count(cause) %>% 
   mutate(total = sum(n)) %>% 
-  ungroup() 
+  ungroup() %>% 
+  mutate(data = "historical")
 
-cause_join_count_bf_season %>% 
+# --- join data; facet by `cause`
+p1 <- cause_join_count_bf_season %>% 
   ggplot() +
   geom_col(aes(x = factor(bf_season),
-               y = total)) +
+               y = total),
+           width = 0.4) +
   geom_col(aes(x = factor(bf_season),
                y = n,
-               fill = cause)) +
+               fill = cause),
+           width = 0.4) +
   facet_wrap(. ~ cause) +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90)) +
-  labs(title = "historical data 2000-2019// sat. data 2019-2020",
+  labs(title = "historical data 2000-2019 & sat. data 2019-2020",
        x = "bushfire season",
        y = "number of ignitions")
 
@@ -1314,19 +1331,27 @@ cause_join_count_bf_season %>%
 cluster_16_21_count_bf_season <- cluster_16_21_df %>% 
   filter(!is.na(bf_season)) %>% 
   group_by(bf_season) %>% 
-  count() %>% 
-  ungroup()  
+  count() %>%
+  ungroup() %>% 
+  rename(total = n) %>% 
+  mutate(data = "cluster")
   # mutate(total = sum(n)) *no `cause`
   
-cluster_16_21_count_bf_season %>% 
+# --- plot historical data & satellite data; side by side
+# *cluster data; total ignitions *no `cause` avail.
+p2 <- full_join(cause_join_count_bf_season, cluster_16_21_count_bf_season) %>% 
   ggplot() +
-  geom_col(aes(x = factor(bf_season),
-               y = n)) +
+  geom_col(aes(x = bf_season,
+               y = total,
+               fill = data),
+           position = "dodge",
+           width = 0.4) +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 90)) +
-  labs(title = "satellite data",
-       x = "bushfire season",
-       y = "number of ignitions")
+  colorspace::scale_fill_discrete_qualitative() +
+  labs(title = "side by side: hist. data(2000-2018) & satellite data (2016-2021)")
+
+#
+p1 / p2
 ```
 
 > the large discrepancy in historical & satellite data; probably due to; significant increase in `accident` ignitions; from 2014 to 2018  
@@ -1349,7 +1374,8 @@ cause_join_count_bf_season %>%
   geom_col(aes(x = bf_season,
                y = n,
                fill = data),
-           position = "dodge") +
+           position = "dodge",
+           width = 0.23) +
   colorspace::scale_fill_discrete_qualitative() +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90))
@@ -1471,4 +1497,326 @@ final_map
 
 
 
+
+
+
+
+
+
+
+
+
+# modelling
+
+## ignition grid (months)
+```{r}
+# --- create funciton; count; no. of points in each raster cell; via raster::rasterize; for each month & year 
+extract_ignition_raster_values_month <- function(data, year, month){
+  
+  # --- count the number of points in each raster cell; via `raster::rasterize`  
+  
+  cause_sf <- data %>% 
+    filter(year == {{year}},
+           month == {{month}}) 
+  
+  # convert from sf -> spdf -> sp; to use `raster::rasterize`
+  cause_spdf <- as(cause_sf, Class = "Spatial")
+  cause_sp <- as(cause_spdf, "SpatialPoints")
+  
+  # count; no. of points; in each raster cell
+  ignition_rasterize <- raster::rasterize(x = cause_sp,# `SpatialPoints` object
+                                          y = vic_raster_crop, # `Raster` object 
+                                          fun = "count",
+                                          background = 0) # set cells w. no fire ignitions to 0
+  
+  # ----- compute; in each grid cell
+  # • `id`: id for cell (rowwise
+  # • `fire_count`: no. of points
+  
+  # --- extract grid cells values; into each tibble
+  ignition_raster_values <- raster::getValues(ignition_rasterize) %>% # extract count values
+    tibble(fire_count = .) %>% 
+    mutate(id = 1:nrow(.), # insert `id` column 
+           year = year,
+           month = month,
+           .before = fire_count) 
+  
+  return(ignition_raster_values)
+}
+```
+
+```{r}
+# --- extract unique year & month
+unique_year_month_df <- cluster_16_21_sf %>% 
+  as_tibble() %>% 
+  distinct(year, month)
+
+# ========== satellite data; 2016-2021 ==========
+ignition_rasterize_cluster_sf_month <- purrr::map2_df(.x = unique_year_month_df %>% pull(year), # years
+                                                      .y = unique_year_month_df %>% pull(month), # months; for each year
+                                                      .f = ~extract_ignition_raster_values_month(cluster_16_21_sf, .x, .y)) 
+```
+
+
+
+
+## read ERA5 data
+```{r}
+era_nc <- ncdf4::nc_open(here::here("data/era5/era5.nc"))
+```
+
+```{r, eval=FALSE}
+# --- print metadata into text file
+{
+  sink(here::here("data/era5/era_nc_metadata.txt"))
+  print(era_nc)
+  sink()
+}
+```
+
+
+```{r}
+# ========== produce `RasterBrick`; for each variable ==========
+# ========== produce wide form df; for all variable values from 01.01.2016 to 01.07.2021 ==========
+
+# --- variable names
+era_var_names <- c("si10", # 10m wind speed
+                   "d2m", # 2m dewpoint temp.
+                   "t2m", # 2m temperature 
+                   "cvh", # high vegetation cover
+                   "lai_hv", # leaf area index; high vegetation
+                   "lai_lv", # leaf area index, low vegetation
+                   "cvl", # low vegetation cover
+                   "slt", # soil type
+                   "ssr", # surface net solar radiation
+                   "tp", # total preciptation
+                   "tvh", # type of high vegetation
+                   "tvl") # type of low vegetation
+
+# --- create empty df
+era_df <- data.frame()
+
+# === create for loop; extract `RasterBrick` & `df`; of each variable
+for(i in 1:length(era_var_names)){
+
+  var <- era_var_names[i]
+  
+  # --- create rasterbrick object; for each variable  
+  var_raster_brick <- raster::brick(here::here("data/era5/era5.nc"),
+                                    ncdf = T,
+                                    varname = var)
+  
+  # name variable
+  var_raster_brick_name <- paste0(var, "_raster")
+  
+  # assign variable to raster
+  assign(x = var_raster_brick_name,
+         value = var_raster_brick)
+  
+  # --- create df; from raster
+  var_df <- var_raster_brick %>% 
+    as.data.frame(xy = T) %>% # return coordinates
+    mutate(var = var)
+  
+  era_df <- rbind(era_df, var_df)
+  
+  # --- remove used variables from environment
+  rm(var_raster_brick) 
+  rm(var_df) 
+}
+
+
+era_df <- era_df %>% 
+  # bring `var` to 1st column
+  relocate(var, .before = x)
+
+era_df_long <- era_df %>% 
+  # put in long form
+  pivot_longer(cols = X2016.01.01:X2021.09.01,
+               names_to = "date",
+               values_to = "value") %>% 
+  # change `date` variable to `date` type
+  mutate(date = stringr::str_remove(string = date,
+                                    pattern = "X")) %>% 
+  mutate(date = lubridate::ymd(date))
+
+era_df_long <- era_df_long %>% 
+  # change temperature from kelvin (K) to celsius
+  mutate(value = case_when(
+    var %in% c("t2m", "d2m") ~ value - 273.15, # celsius = kelvin - 273.15
+    TRUE ~ value
+  ))  
+```
+
+```{r}
+# --- change kelvin to degree celsius; for temperature
+
+# 2m surface temperature
+t2m_raster <- t2m_raster %>% 
+  raster::setValues(values = t2m_raster %>% raster::getValues() - 273.15)
+
+# 2m dew point temperature
+d2m_raster <- d2m_raster %>% 
+  raster::setValues(values = d2m_raster %>% raster::getValues() - 273.15)
+```
+
+```{r}
+# --- change resolution; to have same resolution as `vic_raster_crop`
+# *probably can shorten code
+
+# 10m wind speed
+si10_raster <- raster::resample(si10_raster, vic_raster_crop,
+                                method = "bilinear")   
+
+# 2m dewpoint temp.
+d2m_raster <- raster::resample(d2m_raster, vic_raster_crop,
+                               method = "bilinear")   
+
+# 2m temperature 
+t2m_raster <- raster::resample(t2m_raster, vic_raster_crop,
+                               method = "bilinear")  
+
+# high vegetation cover
+cvh_raster <- raster::resample(cvh_raster, vic_raster_crop,
+                               method = "bilinear")  
+
+# leaf area index; high vegetation
+lai_hv_raster <- raster::resample(lai_hv_raster, vic_raster_crop,
+                                  method = "bilinear")  
+
+# leaf area index, low vegetation
+lai_lv_raster <- raster::resample(lai_lv_raster, vic_raster_crop,
+                                  method = "bilinear")  
+
+# low vegetation cover
+cvl_raster <- raster::resample(cvl_raster, vic_raster_crop,
+                               method = "bilinear")  
+
+# soil type
+slt_raster <- raster::resample(slt_raster, vic_raster_crop,
+                               method = "bilinear")  
+
+# surface net solar radiation
+ssr_raster <- raster::resample(ssr_raster, vic_raster_crop,
+                               method = "bilinear")  
+
+# total preciptation
+tp_raster <- raster::resample(tp_raster, vic_raster_crop,
+                              method = "bilinear") 
+
+# type of high vegetation
+tvh_raster <- raster::resample(tvh_raster, vic_raster_crop,
+                               method = "bilinear") 
+
+# type of low vegetation
+tvl_raster <- raster::resample(tvl_raster, vic_raster_crop,
+                               method = "bilinear") 
+# # more info: https://gis.stackexchange.com/questions/255150/using-resample-vs-aggregate-extend-in-r-to-have-rasters-of-matching-resolutio
+```
+
+```{r}
+era_raster_to_df_func <- function(var){
+  
+  get(paste0(var, "_raster"), environment()) %>% # get var_raster from environment
+    as.data.frame(xy = T) %>% # return coordinates 
+    as_tibble() %>% 
+    mutate(id = 1:n(),
+           var = var,
+           .before = 1)
+}
+
+# --- apply function above; to all variables
+era_df <- map_df(.x = era_var_names,
+                 .f = ~era_raster_to_df_func(.x)) 
+
+era_df_long <- era_df %>% 
+  # put in long form
+  pivot_longer(cols = X2016.01.01:X2021.09.01,
+               names_to = "date",
+               values_to = "value") %>% 
+  # change `date` variable to `date` type
+  mutate(date = stringr::str_remove(string = date,
+                                    pattern = "X")) %>% 
+  mutate(date = lubridate::ymd(date))
+
+# --- `filter` to bushfire months only 
+
+# extract year & months; in clustering data 
+year_month_cluster <- ignition_rasterize_cluster_sf_month %>% 
+  distinct(year, month) %>% 
+  mutate(year_month = paste(year, month, sep = "-")) %>% 
+  # put into date (match era_df_long's `date`)
+  mutate(year_month = lubridate::ym(year_month))
+
+# filter to bushfire months only
+era_df_long <- era_df_long %>% 
+  filter(date %in% year_month_cluster$year_month)
+
+# --- join clustering data & era weather variables data!
+
+# include date
+ignition_rasterize_cluster_sf_month <- ignition_rasterize_cluster_sf_month %>% 
+  mutate(date = paste(year, month, sep = "-")) %>% 
+  mutate(date = lubridate::ym(date))
+
+# join clustering data & era weather variables data!
+era_cluster_join_df <- left_join(era_df_long, ignition_rasterize_cluster_sf_month,
+                                 by = c("id", "date"))
+
+# --- turn into wide-form
+era_cluster_join_df <- era_cluster_join_df %>% 
+  pivot_wider(names_from = var,
+              values_from = value)
+```
+
+
+## Model
+```{r}
+
+```
+
+
+
+
+
+## read in forest data
+```{r}
+vic_forest <- sf::st_read(here::here("data/vic_forest/FORTYPE500.shp"))
+
+vic_forest %>% 
+  as_tibble() %>% 
+  distinct(FTYPE)
+
+vic_forest %>% 
+  plot()
+```
+
+
+```{r}
+sf::st_read(here::here("data/adaptor.mars.internal-1634643802.9604247-4216-5-b948c777-d046-491d-a307-05a36c097c82.grib"))
+```
+## read in weather stations data
+```{r}
+weather_station <- sf::st_read(here::here("data/weather_station/WEATHSTN100.shp"))
+```
+
+  
+    about data
+    
+- point layer; depicting position of observation & automatic weather stations in Victoria
+- from Bureau of Meterology (BOM)
+
+* [metadata url](file:///Users/brenwin/Desktop/bushyr-main/VICfire/data/weather_station/metadata/ANZVI0803002549.html)
+* [download link](https://discover.data.vic.gov.au/dataset/observation-and-automatic-weather-stations)
+
+    
+    Variables
+    
+- `DATETIME`
+- `LAND_AWS55`
+- `STATION_ID`
+- `CODE`
+- `NAME`
+- `ELEVATION`
+- `DATETIME`
 
