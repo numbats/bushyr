@@ -1,0 +1,8 @@
+﻿The column names in a Shape file are limited to 10 characters
+This lists the short column name and the original column name in the database table
+-----------------------------------------------------------------------------------------------------
+
+X_DESC = X_DESC
+HECTARES = HECTARES
+AREASQM = AREASQM
+FTYPE = FTYPE

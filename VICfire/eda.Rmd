@@ -1356,15 +1356,15 @@ p1 / p2
 
 > the large discrepancy in historical & satellite data; probably due to; significant increase in `accident` ignitions; from 2014 to 2018  
 
-```{r}
+```{r, eval=FALSE}
 cause_join_count_bf_season %>% 
   filter(bf_season %in% unique(cluster_16_21_count_bf_season$bf_season)) %>% 
   select(bf_season, total) %>% 
   # join cluster & join data counts
   right_join(cluster_16_21_count_bf_season,
             by = "bf_season") %>% 
-  rename(total_join = total,
-         total_cluster = n) %>% # fire ignitions; in clustering data (2016-2021)
+  rename(total_join = total.x,
+         total_cluster = total.y) %>% # fire ignitions; in clustering data (2016-2021)
   distinct(bf_season,
            .keep_all = T) %>% 
   pivot_longer(cols = total_join:total_cluster,
@@ -1771,11 +1771,53 @@ era_cluster_join_df <- era_cluster_join_df %>%
 
 
 ## Model
-```{r}
+```{r, eval=FALSE}
+era_cluster_join_model_df <- era_cluster_join_df %>% 
+  select(-x, -y, -date)
 
+era_cluster_join_model_df <- era_cluster_join_model_df %>% 
+  # factorise id// month// year
+  mutate(id = factor(id),
+         year = factor(year),
+         month = factor(month)) # %>% 
+  # mean normalise variables
+  # mutate(across(.cols = si10:tvl,
+  #               .fns = function(x) (x - mean(x)) / sd(x))) %>% 
+
+era_cluster_join_model_df %>% 
+  na.omit() %>% 
+  select(-id) %>% 
+  GGally::ggpairs()
 ```
 
+    generalised pairs plot
+- doesn't reveal much; suggests grouping structure perhaps
 
+```{r}
+era_cluster_join_model_df <- era_cluster_join_model_df %>% 
+  # mean normalise variables
+  mutate(across(.cols = si10:tp,
+                .fns = function(x) (x - mean(x)) / sd(x))) %>% 
+  mutate(year = as.numeric(as.character(year))) %>%
+  # center year 
+  mutate(year = year - min(year)) %>% 
+  mutate(year = factor(year))
+
+stats::lm(fire_count ~ . -id,
+          data = era_cluster_join_model_df) %>% 
+  summary()
+  
+era_cluster_join_model_df <- era_cluster_join_model_df %>% 
+  select(-c(cvh, lai_hv, lai_lv, cvl, slt, tvh, tvl))
+
+lme4::lmer(fire_count ~ . - id + (year | id),
+           data = era_cluster_join_model_df) %>% 
+  summary()
+
+  era_cluster_join_model_df %>% 
+  select(-id) %>% 
+  GGally::ggpairs()
+```
 
 
 
@@ -1792,9 +1834,6 @@ vic_forest %>%
 ```
 
 
-```{r}
-sf::st_read(here::here("data/adaptor.mars.internal-1634643802.9604247-4216-5-b948c777-d046-491d-a307-05a36c097c82.grib"))
-```
 ## read in weather stations data
 ```{r}
 weather_station <- sf::st_read(here::here("data/weather_station/WEATHSTN100.shp"))

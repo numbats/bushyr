@@ -3,6 +3,7 @@ library(tidyverse)
 library(tmap)
 library(shinyWidgets)
 library(shinycssloaders)
+
 # **************************************** outside app ****************************************
 
 # --- set spinner colour to red
@@ -34,6 +35,14 @@ vic_raster <- raster::brick(
   # crs
   crs = 4326
 )
+
+# === Victoria map (sfdf MULTIPOLYGON)
+vic_map_sf <- ozmaps::ozmap_states %>%
+  filter(NAME == "Victoria")
+
+# --- project crs
+vic_map_sf <- sf::st_transform(vic_map_sf,
+                               crs = 4326)
 
 # --- mask raster; to only Victorian map
 # * `raster` package; NOT compatible with `sf` yet; so; need; change to `sp`
@@ -137,7 +146,7 @@ server <- function(input, output) {
                                          # --- frequency distribution; to draw no. of bushfires
                                          # based on user selection of `year` and `seasons`
                                          freq_dist_year_season <- cause_join_sf %>%
-                                           count(year)
+                                           count(year) # broadest group
 
                                          # --- create empty storage matrix
                                          sim_count <- matrix(NA,
