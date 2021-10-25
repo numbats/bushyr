@@ -620,7 +620,7 @@ sim_count_sp <- sim_count %>%
   rename(lon = x,
          lat = y,
          sim_id = V3) %>%
-  select(-sim_id) %>% # cannot have `sim_id` when `rasterize`
+  dplyr::select(-sim_id) %>% # cannot have `sim_id` when `rasterize`
   # convert to `sp` object
   sp::SpatialPoints()
 
@@ -1820,35 +1820,6 @@ lme4::lmer(fire_count ~ . - id + (year | id),
 ```
 
 
-
-## read in forest data
-```{r}
-vic_forest <- sf::st_read(here::here("VICfire/data/vic_forest/FORTYPE500.shp"))
-
-vic_forest %>% 
-  as_tibble() %>% 
-  distinct(FTYPE)
-
-vic_forest %>% 
-  plot()
-```
-
-
-## read in weather stations data
-```{r}
-weather_station <- sf::st_read(here::here("VICfire/data/weather_station/WEATHSTN100.shp"))
-```
-
-  
-    about data
-    
-- point layer; depicting position of observation & automatic weather stations in Victoria
-- from Bureau of Meterology (BOM)
-
-* [metadata url](file:///Users/brenwin/Desktop/bushyr-main/VICfire/data/weather_station/metadata/ANZVI0803002549.html)
-* [download link](https://discover.data.vic.gov.au/dataset/observation-and-automatic-weather-stations)
-
-
 ## road distance
 -- notes: the shp file is too large to be pushed to github so instead, we wrote the file to csv "ERA5_withroad.csv" and it can be found in the data folder. 
 ```{r, eval = FALSE}
@@ -1867,7 +1838,131 @@ era_cluster_join_model_df$dist_road <- as.numeric(temp)
 rm(road, era5_temp)
 ```
 
-```{r}
+```{r, eval = FALSE}
 #writing the fle to csv
 write_csv(era_cluster_join_model_df, "data/ERA5_withroad.csv")
 ```
+
+```{r}
+# reading the data with dist_road
+ERA5_withroad <- read.csv(here::here("VICfire/data/ERA5_withroad.csv"))
+```
+
+
+## read in forest data
+-- need to check if this forest data is reliable considering that it is from 2018. some forest areas might be burned from previous bushfires--
+
+```{r}
+vic_forest <- sf::st_read(here::here("VICfire/data/vic_forest/FORTYPE500.shp"))
+
+vic_forest %>% 
+  as_tibble() %>% 
+  distinct(FTYPE)
+
+vic_forest %>% 
+  plot()
+```
+
+
+```{r}
+forest <- raster(here::here('VICfire/data/aus_for18_publish/aus_for18_publish/aus_for18/z001001.adf'))
+
+ERA5_withroad <- ERA5_withroad %>%
+  rename(lon = x,
+         lat = y)
+
+# project to EPSG:3577
+fire_points <- SpatialPoints(dplyr::select(ERA5_withroad, lon, lat), proj4string=CRS("+proj=longlat +datum=WGS84")) %>%
+  spTransform(projection(forest))
+
+# extract ID of rectangles
+fire_forest_index <- extract(forest, fire_points)
+
+
+# access attributes in forest 2018
+fire_forest_info <- levels(forest) %>%
+  as.data.frame()
+
+fire_forest_info <- fire_forest_info %>%
+  .[fire_forest_index,] %>%
+  as_tibble()
+
+# join back to the dataset
+for (variable in names(fire_forest_info)){
+  ERA5_withroad[[variable]] <- fire_forest_info[[variable]]
+}
+```
+
+```{r}
+# checking for missing values \
+library(visdat)
+ERA5_withroad %>% vis_miss()
+```
+some of the data in the forest data has missing values (16% in total of NAs), which is quite a lot.
+
+```{r}
+au_map <- ne_states(country = 'Australia', returnclass = 'sf')
+vic_map <- au_map[7,]
+
+vic_map_sf <- vic_map %>%
+  st_as_sf(coords = c("lon", "lat"))
+
+ERA5_NA <- ERA5_withroad %>%
+  mutate(value = case_when(!is.na(FOREST) ~ 1,
+                           is.na(FOREST) ~ 0)) %>%
+  dplyr::select(lon, lat, value)
+
+NA_raster <- rasterFromXYZ(ERA5_NA)
+
+tm_shape(NA_raster$value) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+The missing values are on the boundaries of Victoria. Therefore, we can remove these values. (?)
+
+```{r}
+# filtering out the NA values
+ERA5_filtered <- ERA5_withroad %>%
+  filter(!is.na(FOREST))
+```
+
+```{r}
+# writing to csv
+write.csv(ERA5_filtered, "data/era5_withroad_forest")
+```
+
+
+## read in weather stations data
+```{r}
+weather_station <- sf::st_read(here::here("VICfire/data/weather_station/WEATHSTN100.shp"))
+```
+
+  
+    about data
+    
+- point layer; depicting position of observation & automatic weather stations in Victoria
+- from Bureau of Meterology (BOM)
+
+* [metadata url](file:///Users/brenwin/Desktop/bushyr-main/VICfire/data/weather_station/metadata/ANZVI0803002549.html)
+* [download link](https://discover.data.vic.gov.au/dataset/observation-and-automatic-weather-stations)
+
+
+## creating lags
+--- NEED TO HAVE THE DAILY DATA---
+
+
+## modeling
+### simple linear model
+```{r}
+linearmodel <- lm(fire_count ~ .-id, data = ERA5_withroad)
+summary(linearmodel)
+```
+R-squared: 55% - not a really good model
+
+
+
+
