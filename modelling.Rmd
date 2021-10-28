@@ -1,0 +1,365 @@
+---
+title: "modeling"
+author: "Helen Evangelina"
+date: "29/10/2021"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(zoo)
+library(raster)
+library(sp)
+```
+
+```{r}
+data <- read.csv(here::here("data/model_df"))
+```
+
+```{r}
+library(visdat)
+vis_miss(data)
+```
+
+```{r}
+vic_raster <- raster(
+  # no. of rows & columns (directly linked to resolution of grid cell)
+  nrows = 20,
+  ncols = 20,
+  
+  # bbox (bounding box of Victoria)
+  xmn = 140.9617,
+  xmx = 149.9763,
+  ymn = -39.13396,
+  ymx = -33.99605,
+  
+  # crs
+  crs = "+proj=longlat +datum=WGS84"
+  )
+vic_raster[] <- 1:ncell(vic_raster)
+lonlat <- as.data.frame(coordinates(vic_raster)) %>%
+  mutate(id = 1:400)
+lonlat
+```
+
+```{r}
+data2 <-  data %>%
+  left_join(lonlat, by = "id") 
+```
+
+
+## adding FOR_TYPE
+
+```{r}
+forest <- raster(here::here('data/aus_for18_publish/aus_for18_publish/aus_for18/z001001.adf'))
+
+# project to EPSG:3577
+fire_points <- SpatialPoints(dplyr::select(data2, x, y), proj4string=CRS("+proj=longlat +datum=WGS84")) %>%
+  spTransform(projection(forest))
+
+# extract ID of rectangles
+fire_forest_index <- extract(forest, fire_points)
+
+
+# access attributes in forest 2018
+fire_forest_info <- levels(forest) %>%
+  as.data.frame()
+
+fire_forest_info <- fire_forest_info %>%
+  .[fire_forest_index,] %>%
+  as_tibble()
+
+# join back to the dataset
+for (variable in names(fire_forest_info)){
+  data2[[variable]] <- fire_forest_info[[variable]]
+}
+```
+
+```{r}
+# checking for missing values \
+library(visdat)
+data2 %>% vis_miss()
+```
+some of the data in the forest data has missing values (19.9% in total of NAs), which is quite a lot.
+
+```{r}
+library(rnaturalearth)
+library(sf)
+library(tmap)
+au_map <- ne_states(country = 'Australia', returnclass = 'sf')
+vic_map <- au_map[7,]
+
+vic_map_sf <- vic_map %>%
+  st_as_sf(coords = c("lon", "lat"))
+
+data2_NA <- data2 %>%
+  mutate(value = case_when(!is.na(FOREST) ~ 1,
+                           is.na(FOREST) ~ 0)) %>%
+  dplyr::select(x, y, value)
+
+NA_raster <- rasterFromXYZ(data2_NA)
+
+tm_shape(NA_raster$value) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+The missing values are on the boundaries of Victoria. Therefore, we can remove these values.
+
+```{r}
+# filtering out the NA values
+data2 <- data2 %>%
+  filter(!is.na(FOREST))
+```
+
+## creating lags
+-- since we have monthly data, we can create a 2 months, 3 months, 6 months and a year lag.
+2months -> average rainfall in the last 2 months
+
+### for rain
+```{r}
+data_lagged <- data2 %>%
+  arrange(id) %>%
+  group_by(id) %>%
+  mutate(rain2 = (daily_rain + lag(daily_rain))/2,
+         rain3 = rollsumr(daily_rain, k = 3, fill = NA)/3)
+```
+putting it into the model, rain3 and rain6 are not significant? but why after adding rain12, rain6 and rain12 become significant.
+
+### for et
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(et2 = rollsumr(et_short_crop, k = 2, fill = NA)/2,
+         et3 = rollsumr(et_short_crop, k = 3, fill = NA)/3)
+```
+
+### for max_temp
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(max_temp2 = rollsumr(max_temp, k = 2, fill = NA)/2,
+         max_temp3 = rollsumr(max_temp, k = 3, fill = NA)/3)
+```
+
+### radiation
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(radiation2 = rollsumr(radiation, k = 2, fill = NA)/2,
+         radiation3 = rollsumr(radiation, k = 3, fill = NA)/3)
+```
+
+### rh
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(rh2 = rollsumr(rh, k = 2, fill = NA)/2,
+         rh3 = rollsumr(rh, k = 3, fill = NA)/3)
+```
+
+### si10
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(si102 = rollsumr(si10, k = 2, fill = NA)/2,
+         si103 = rollsumr(si10, k = 3, fill = NA)/3)
+```
+
+### lai_hv
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(lai_hv2 = rollsumr(lai_hv, k = 2, fill = NA)/2,
+         lai_hv3 = rollsumr(lai_hv, k = 3, fill = NA)/3)
+```
+
+### lai_lv
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(lai_lv2 = rollsumr(lai_lv, k = 2, fill = NA)/2,
+         lai_lv3 = rollsumr(lai_lv, k = 3, fill = NA)/3)
+```
+
+## modeling
+### simple linear model
+```{r}
+lm <- lm(fire_count ~ .-id, data = data)
+summary(lm)
+```
+without lag variables, important: month, daily_rain, et_short_crop, max_temp, radiation, si10, lai_hv, lai_lv, forest
+
+```{r}
+linearmodel <- lm(log(fire_count+1) ~ .-id, data = data_lagged, na.action= na.exclude)
+summary(linearmodel)
+```
+R-squared: 16.93% - not a good model
+
+### linear model with only significant variables
+```{r}
+linearmodel2 <- lm(fire_count ~ x + y +month +et_short_crop + radiation + si10 + lai_lv + forest + rain2 +et2 + et3 + max_temp2 + max_temp3 + radiation2+ rh2 +si102 + si103 +  lai_hv2 + lai_hv3 + lai_lv2 + lai_lv3, data = data_lagged, na.action = na.exclude)
+summary(linearmodel2)
+```
+```{r}
+linearmodel3 <- lm(fire_count ~ x + y +month +et_short_crop + radiation + si10 + lai_lv + forest + rain2 +et2 + et3 + max_temp2 + max_temp3 + radiation2+ rh2 +si102 + si103 +  lai_hv2 + lai_hv3 + lai_lv3, data = data_lagged, na.action = na.exclude)
+summary(linearmodel3)
+```
+
+```{r}
+anova(linearmodel2, linearmodel3)
+```
+If p-value > 0.05, do not rejetc null hypothesis that the smaller model is true --> smaller model is better. 
+- linearmodel2 is better than linearmodel
+-linearmodel3 is better 
+
+### checking if the variables are linear
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = daily_rain)) +
+  geom_jitter() +
+  geom_smooth()
+```
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = rh)) +
+  geom_jitter() +
+  geom_smooth()
+```
+
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = max_temp)) +
+  geom_jitter() +
+  geom_smooth()
+```
+
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = radiation)) +
+  geom_jitter() +
+  geom_smooth()
+```
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = lai_hv)) +
+  geom_jitter() +
+  geom_smooth()
+```
+
+### glm 
+```{r}
+data_glm <- data_omitted %>%
+  dplyr::select(-FOR_TYPE, -COVER, -HEIGHT, -x, -y)
+glm <- glm(fire_count ~ ., data = data_glm, family = poisson())
+summary(glm)
+```
+- comparing with normal lm model:
+```{r}
+lm2 <- glm(fire_count ~ ., data = data_glm, family = "gaussian")
+summary(lm2)
+```
+
+both models have high deviance which indicates that the two models are not really a good model. But lm has way higher deviance, which means glm is better.
+
+- plotting the model:
+```{r}
+augment_lm <- augment(lm2)
+ggplot(lm2, aes(x = .fitted,
+             y = .resid)) + 
+  geom_point() +
+  geom_smooth()
+
+augment_glm <- augment(glm)
+ggplot(augment_glm, aes(x = .fitted,
+             y = .resid)) + 
+  geom_point() +
+  geom_smooth()
+```
+
+
+
+### Random Forest 
+RF does not work with NAs. With NAs, rf will omit the NAs or impute the values. imputing the values wont work in this case. 
+
+#### with lagged variables
+```{r}
+data_lagged_omitted <- data_lagged %>% na.omit() %>% dplyr::select(-FOR_CODE, FOR_CAT)
+
+library(randomForest)
+library(tidymodels)
+set.seed(2021)
+rfmodel <- rand_forest() %>%
+  set_engine("randomForest",
+             importance=TRUE, proximity=TRUE) %>%
+  set_mode("regression") %>%
+  fit(fire_count~ ., data= data_lagged_omitted)
+rfmodel
+```
+
+```{r}
+rand1 <- randomForest(log(fire_count+1) ~ ., data = data_lagged_omitted, importance = TRUE, mtry = 5, ntree = 500) 
+rand1
+```
+MSE looks good?
+
+
+```{r}
+importance(rand1)
+varImpPlot(rand1)
+```
+important variables: radiation, month, rain3, daily_rain, et_short_crop, rh3, id, rh, radiation2, rain2, rh2, et2,year, max_temp,  si10, max_temp3, radiation2, lai_lv3, radiation3, lai_lv
+
+--- with important variables ---- 
+```{r}
+set.seed(2021)
+rand2 <- randomForest(log(fire_count+1) ~ radiation + month + daily_rain + rain3 + et_short_crop + id + rh + max_temp + rh3 + et2 + rain2 + year + si10 + max_temp3 + radiation2 + radiation3 + si103 + max_temp2, data = data_lagged_omitted, importance = TRUE) 
+rand2
+```
+41.86%
+MSR 0.165
+
+
+forest surprisingly isnt significant?
+
+#### without lagged variables
+```{r}
+data2_selected <- data2 %>% dplyr::select(-STATE, - FOR_SOURCE, -FOR_CAT, -COUNT, - FOR_CODE)
+```
+
+
+```{r}
+data_omitted <- data2_selected %>% na.omit()
+rand_ori <- randomForest(log(fire_count+1) ~ ., data = data_omitted, importance = TRUE) 
+rand_ori
+```
+better than using the lagged data?
+% var explained: 42.98%, MSR: 0.154
+
+```{r}
+importance(rand_ori)
+varImpPlot(rand_ori)
+```
+
+```{r}
+rand_ori2 <- randomForest(log(fire_count+1) ~ month + radiation + year + daily_rain + id + rh + si10 + lai_hv + lai_lv + max_temp + et_short_crop + FOR_TYPE, data = data_omitted, importance = TRUE) 
+rand_ori2
+```
+First one is better than using selected variables.
+
+```{r}
+library(caret)
+
+x <- data_omitted %>% dplyr::select(-fire_count)
+y <- data_omitted$fire_count
+
+tuneRF(x, y)
+```
