@@ -1,0 +1,1213 @@
+---
+title: "IDA"
+author: "Brenwin"
+date: "26/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# --- load libraries
+library(tidyverse)
+library(ozmaps)
+library(tmap)
+library(raster)
+library(sf)
+library(sp)
+library(spatstat)
+library(patchwork)
+library(tidymodels)
+```
+
+# Data compilation
+
+## Victoria map
+```{r}
+# ========== Victoria map (sfdf MULTIPOLYGON) ==========
+vic_map_sf <- ozmaps::ozmap_states %>% 
+  filter(NAME == "Victoria")
+
+# --- project crs
+vic_map_sf <- sf::st_transform(vic_map_sf,
+                               crs = 4326)
+
+# ========== `vic_raster` ==========
+
+# --- create `vic_raster` object *to be toggled
+vic_raster <- raster::brick(
+  # no. of rows & columns (directly linked to resolution of grid cell)
+  nrows = 20,
+  ncols = 20,
+  
+  # bbox (bounding box of Victoria)
+  xmn = 140.9617,
+  xmx = 149.9763,
+  ymn = -39.13396,
+  ymx = -33.99605,
+  
+  # crs
+  crs = 4326,
+  
+  # set `raster` values (rowwise)
+  # vals = seq(from = 1, to = 400000, by = 1000) 
+  )
+
+# --- mask raster; to only Victorian map 
+
+# change vic_map_sf to `sp` object 
+# *`raster` package; NOT compatible with `sf` yet; so; need; change to `sp` 
+vic_map_sp <- as(vic_map_sf, 
+                 Class = "Spatial")
+
+# mask (*think: crop to polygon shape) raster; to only Victorian map (`vic_map_sp`)
+vic_raster_crop <- vic_raster %>% 
+  raster::mask(mask = vic_map_sp)
+```
+
+## Clustering data
+```{r}
+# =========== read in clustering data; as data frame ==========
+
+# --- read in 2016-2021 clustering data
+cluster_16_21_df <- readr::read_csv("data/clustering/predict_x_2016_2018.csv") %>% # 2016-2019
+  rbind(readr::read_csv("data/clustering/predict_x_2019_2020.csv")) %>% # 2019-2021
+  rename(date = time) %>%
+  # filter to bushfire season months
+  mutate(year = lubridate::year(date),
+         month = lubridate::month(date)) %>% 
+  filter(month %in% c(1, 2, 3, 10, 11, 12)) %>% 
+  arrange(date, year, month)
+
+# ===== add `bf_season` variable (group years from Oct-Mar together)
+
+# --- create storage vector
+bf_season <- numeric(nrow(cluster_16_21_df))
+group <- 1 # start from group 1
+current_year <- min(cluster_16_21_df$year) # start from minimum year
+
+# --- for loop
+# •if following year & month == 10; group + 1
+# -> i.e. group by bushfire season (10(Oct) to 3(March))
+for(i in seq_along(cluster_16_21_df$date)){
+    
+  # group + 1; if its next year & month == 10 (October)
+  if(current_year == cluster_16_21_df$year[i] - 1 & cluster_16_21_df$month[i]  == 10){
+    group <- group + 1
+    current_year <- current_year + 1
+  }  
+  
+  bf_season[i] <- group
+}
+
+cluster_16_21_df <- cbind(cluster_16_21_df, bf_season) %>% 
+  group_by(bf_season) %>% 
+  # add bushfire season column
+  mutate(bf_season = paste0(min(year), "-", min(year + 1))) %>% 
+  mutate(bf_season = factor(bf_season)) %>% 
+  ungroup()
+
+cluster_16_21_sf <- cluster_16_21_df %>% 
+  sf::st_as_sf(coords = c("lon", "lat"))
+```
+
+```{r}
+# ========== function; extract `sf` polygon; for each grid cell; to facet by `year` ==========
+
+# --- create funciton; count; no. of points in each raster cell; via raster::rasterize; for each month & year 
+extract_ignition_raster_values_month <- function(data, year, month){
+  
+  # --- count the number of points in each raster cell; via `raster::rasterize`  
+  
+  cause_sf <- data %>% 
+    filter(year == {{year}},
+           month == {{month}}) 
+  
+  # convert from sf -> spdf -> sp; to use `raster::rasterize`
+  cause_spdf <- as(cause_sf, Class = "Spatial")
+  cause_sp <- as(cause_spdf, "SpatialPoints")
+  
+  # count; no. of points; in each raster cell
+  ignition_rasterize <- raster::rasterize(x = cause_sp,# `SpatialPoints` object
+                                          y = vic_raster_crop, # `Raster` object 
+                                          fun = "count",
+                                          background = 0) # set cells w. no fire ignitions to 0
+  
+  # ----- compute; in each grid cell
+  
+  
+  
+  # --- convert from `raster` -> spdf -> `sf` object; for manipulation & plot
+  ignition_rasterize_sf <- as(ignition_rasterize, "SpatialPolygonsDataFrame") %>% 
+    sf::st_as_sf(ignition_rasterize) %>% 
+    rename(fire_count = layer) %>% # `fire_count`: no. of points; in each raster cell
+    mutate(id = 1:nrow(.), # id for cell (rowwise)
+           year = year, # year *function input
+           month = month, # month function input
+           .before = fire_count) 
+    
+  
+  return(ignition_rasterize_sf)
+}
+```
+
+```{r}
+# --- extract unique year & month
+unique_year_month_df <- cluster_16_21_sf %>% 
+  as_tibble() %>% 
+  distinct(year, month)
+
+# ========== satellite data; 2016-2021 ==========
+# --- run function; for all unique years & months
+ignition_rasterize_cluster_sf_month <- purrr::map2_df(.x = unique_year_month_df %>% pull(year), # years
+                                                      .y = unique_year_month_df %>% pull(month), # months; for each year
+                                                      .f = ~extract_ignition_raster_values_month(cluster_16_21_sf, .x, .y)) 
+```
+
+```{r}
+# === e.g. mapping clustering data
+tmap::tm_shape(ignition_rasterize_cluster_sf_month) + 
+  # polygon; fill by `fire_count`, no. of fire ignitions in the cell
+  tmap::tm_polygons(col = "fire_count") +
+  tmap::tm_shape(cluster_16_21_sf) +
+  # clustering data
+  # *note: no causes
+  tmap::tm_bubbles(size = 0.3,
+                   alpha = 0.3)
+```
+
+
+## SILO- Australian climate data from 1889 to yesterday
+
+    about SILO
+- [link](https://www.longpaddock.qld.gov.au/silo/gridded-data/)
+- downloadable Australia climate data from 1889 to yesterday
+
+    available variables
+- monthly rainfall /
+- max temperature / 
+- solar radiation /
+- relative humidity / 
+- FAO56 short crop evapotranspiration /
+  - SPEI(proxy for drought) is based on this [*see link](https://spei.csic.es/database.html)
+- vapour pressure deficit X
+*daily data
+
+### `max_temp`
+
+```{r}
+# ========== create function; read in variables from SILO data ==========
+# -> returns `RasterBrick` object
+
+read_silo_func <- function(var, year){
+  
+  # --- name raster stack
+  var_raster_crop_name <- paste0(var, "_raster_crop") # e.g. max_temp_raster_crop
+  
+  # --- create; empty raster stack
+  var_raster_stack <- raster::stack()
+    
+  for(i in 1:length(year)){
+    # --- read in raster from .nc file
+    var_raster_brick <- raster::brick(here::here(paste0("data/silo/",var,"/",year[i],".",var,".nc")))
+    
+    # --- `crop` & `mask` raster to Victoria map
+    var_raster_crop <- var_raster_brick %>% 
+      # make bounding box; to Vic map
+      raster::crop(vic_map_sp) %>% 
+      # set all cells; NOT in Victoria NA
+      raster::mask(mask = vic_map_sp)
+    
+    # --- set same resolution as `vic_raster_crop` (20x20 for now)
+    # average values of smaller cells in large cell
+    var_raster_crop <- raster::resample(var_raster_crop, vic_raster_crop,
+                                        method = "bilinear") 
+    
+    # --- add particular year's `rasterbrick` into `rasterstack` 
+    var_raster_stack <- stack(var_raster_stack, var_raster_crop)
+  }
+  
+  return(raster::brick(var_raster_stack))
+}
+```
+
+```{r}
+# ========== `max_temp` ==========
+
+# --- `RasterBrick`; from 2016-2021
+max_temp_raster_crop <- read_silo_func(var = "max_temp",
+                                       year = 2016:2021)
+
+# --- `df`: variable value in each cell
+max_temp_df <- max_temp_raster_crop %>% 
+  as.data.frame(xy = T) %>% 
+  mutate(id = 1:nrow(.),
+         var = "max_temp",
+         .before = x)
+```
+
+    function
+- reads in SILO data; any variable from [link](https://www.longpaddock.qld.gov.au/silo/gridded-data/)
+- format: ensure file path (folder & name of .nc file); same as variable name
+
+
+### `rh` relative humidity 
+```{r}
+# ========== `rh` ==========
+
+# --- `RasterBrick`; from 2016-2021
+rh_raster_crop <- read_silo_func(var = "rh_tmax",
+                                 year = 2016:2021)
+
+# --- `df`: variable value in each cell
+rh_df <- rh_raster_crop %>% 
+  as.data.frame(xy = T) %>% 
+  mutate(id = 1:nrow(.),
+         var = "rh",
+         .before = x)
+```
+
+### `radiation`: solar radiation - total incoming downward shortwave radiation on a horizontal surface
+```{r}
+# --- `RasterBrick`; from 2016-2021
+radiation_raster_crop <- read_silo_func(var = "radiation",
+                                        year = 2016:2021)
+
+# --- `df`: variable value in each cell
+radiation_df <- radiation_raster_crop %>% 
+  as.data.frame(xy = T) %>% # return coordinates
+  dplyr::select(-X2021.10.25) %>% # extra column *download data on different days!!!
+  mutate(id = 1:nrow(.),
+         var = "radiation",
+         .before = x)
+```
+
+### `et_short_crop`: short crop evapotranspiration
+```{r}
+# --- `RasterBrick`; from 2016-2021
+et_short_crop_raster_crop <- read_silo_func(var = "et_short_crop",
+                                            year = 2016:2021)
+
+# --- `df`: variable value in each cell
+et_short_crop_df <- et_short_crop_raster_crop %>% 
+  as.data.frame(xy = T) %>%  # return coordinates
+  mutate(id = 1:nrow(.),
+         var = "et_short_crop",
+         .before = x)
+```
+
+
+    proxy for drought 
+*probably; need; take lags see SPEI 
+
+### `daily_rain`: daily rainfall (in mm)
+```{r}
+# --- `RasterBrick`; from 2016-2021
+daily_rain_raster_crop <- read_silo_func(var = "daily_rain",
+                                            year = 2016:2021)
+
+# --- `df`: variable value in each cell
+daily_rain_df <- daily_rain_raster_crop %>% 
+  as.data.frame(xy = T) %>%  # return coordinates
+  dplyr::select(-X2021.10.25) %>% 
+  mutate(id = 1:nrow(.),
+         var = "daily_rain",
+         .before = x)
+```
+
+### putting it all together
+
+```{r}
+silo_df <- rbind(max_temp_df, rh_df, radiation_df, et_short_crop_df, daily_rain_df) %>% 
+  as_tibble() %>% 
+  pivot_longer(cols = X2016.01.01:X2021.10.24,
+               names_to = "date",
+               values_to = "values") %>% 
+  # change `chr` date to `date` format
+  mutate(date = str_remove_all(string = date,
+                               pattern = "X")) %>% 
+  # add year & month column
+  mutate(date = lubridate::ymd(date)) %>% 
+  mutate(year = lubridate::year(date),
+         month = lubridate::month(date)) 
+
+# --- aggregate daily data to monthly data: avg. 
+silo_df_monthly <- silo_df %>% 
+  group_by(id, x, y, # each cell centroid
+           year, month, # year & month
+           var) %>% # variable
+  summarise(values = mean(values,
+                          na.rm = T)) %>% 
+  ungroup()
+
+# --- wide form 
+silo_df_monthly_wide <- silo_df_monthly %>% 
+  pivot_wider(names_from = var,
+              values_from = values)
+```
+
+    NaN values
+- these coordinates; not on Victoria (in the sea)
+
+## ERA5 data
+
+    whole range of variables available
+- [link](https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels-monthly-means?tab=overview)
+  - monthly data 
+  *hourly data; also avail.
+  
+    
+    downloaded variables
+- `WS10`: 10m wind speed
+- `lai_hv`: leaf area index, high vegetation
+- `lai_lv`: leaft area index, low vegetation
+    
+```{r readin-era}
+# --- read in data
+era_nc <- ncdf4::nc_open(here::here("data/era5/era_data.nc"))
+
+# --- print metadata in .txt file
+{
+  sink(here::here("data/era5/era_data_metadata.txt")) # open .txt file
+  print(era_nc)
+  sink() # close file
+}
+```
+
+
+```{r}
+# ========== create function; read in variables from ERA5 ==========
+# -> returns `RasterBrick` object
+# -> over time frame (years); downloaded from data base
+
+read_era_func <- function(var){
+  
+  # --- read in `RasterBrick` from .nc file
+  var_raster_brick <- raster::brick(here::here(paste0("data/era5/era_data.nc")),
+                                    ncdf = T,
+                                    varname = var)  
+  
+  # --- `crop` & `mask` raster; to Victoria map
+  var_raster_crop <- var_raster_brick %>% 
+    # make bounding box; to Vic map
+    raster::crop(vic_map_sp) %>% 
+    # set all cells; NOT in Victoria NA
+    raster::mask(mask = vic_map_sp)
+  
+  # --- set same resolution as `vic_raster_crop` (20x20 for now)
+  # average values of smaller cells in large cell
+  var_raster_crop <- raster::resample(var_raster_crop, vic_raster_crop,
+                                      method = "bilinear")
+  
+  return(var_raster_crop)
+}
+```
+
+```{r}
+# --- `si10`: 10m wind speed
+
+# `RasterBrick`; from 2016-2021
+si10_raster_crop <- read_era_func("si10")
+
+# `df`: variable value in each cell centroid 2016-2021
+si10_df <- si10_raster_crop %>% 
+  as.data.frame(xy = T) %>%  # return coordinates
+  mutate(id = 1:nrow(.),
+          var = "si10",
+         .before = x)
+
+# --- `lai_hv`: leaf area index, high vegetation
+
+# `RasterBrick`; from 2016-2021
+lai_hv_raster_crop <- read_era_func("lai_hv") 
+
+# `df`: variable value in each cell centroid 2016-2021
+lai_hv_df <- lai_hv_raster_crop %>% 
+  as.data.frame(xy = T) %>% 
+  mutate(id = 1:nrow(.),
+         var = "lai_hv",
+         .before = x)
+
+# `RasterBrick`; from 2016-2021
+lai_lv_raster_crop <- read_era_func("lai_lv") 
+
+# `df`: variable value in each cell centroid 2016-2021
+lai_lv_df <- lai_lv_raster_crop %>% 
+  as.data.frame(xy = T) %>% 
+  mutate(id = 1:nrow(.),
+         var = "lai_lv",
+         .before = x)
+```
+
+```{r}
+# --- putting it all together
+era_df <- rbind(si10_df, lai_hv_df, lai_lv_df) %>% 
+  pivot_longer(cols = X2016.01.01:X2021.09.01,
+               names_to = "date",
+               values_to = "values") %>% 
+  # change `chr` date to `date` format
+  mutate(date = str_remove_all(string = date,
+                               pattern = "X")) %>% 
+  # add year & month column
+  mutate(date = lubridate::ymd(date)) %>% 
+  mutate(year = lubridate::year(date),
+         month = lubridate::month(date)) %>% 
+  dplyr::select(-date)
+
+# --- wide form; for modelling
+era_df_wide <- era_df %>% 
+  pivot_wider(names_from = var,
+              values_from = values) 
+```
+
+
+
+
+## ERA5 data (Fire danger indices) *huge files
+
+## `vic_forest` data
+
+    DELWP (Dept. of Environment, Land, Water and Planning) data
+
+
+```{r}
+vic_forest <- sf::st_read(here::here("data/vic_forest/FORTYPE500.shp"))
+
+# convert `raster` -> `spdf` -> `sf`; to conduct spatial join
+vic_raster_crop_sf <- vic_raster_crop %>%
+  setValues(1:400) %>% # set id values *required to convert to `spdf`
+  as(., "SpatialPolygonsDataFrame") %>% 
+  sf::st_as_sf() %>% 
+  rename(id = layer)
+
+# --- find forest; intersect with each raster grid cell
+
+# ensure; same crs
+vic_raster_crop_sf <- sf::st_transform(vic_raster_crop_sf,
+                                       crs = sf::st_crs(vic_forest,
+                                                        asText = T))
+
+# --- find forest; intersect with each raster grid cell
+vic_forest_intersect <- sf::st_intersects(vic_raster_crop_sf,
+                                          vic_forest)
+
+# --- 1st cell intersection *temporary
+intersect_row <- vic_forest[vic_forest_intersect[[1]], ] %>%
+  filter(AREASQM == max(AREASQM))
+
+# --- create empty sf object; with same columns
+large_vic_forest_intersect_sf <- intersect_row[2,] # empty row
+
+for(i in 1:length(vic_forest_intersect)){
+    
+  # --- extract 1st raster cell's intersection with vic_forest
+  intersect_row_loop <- vic_forest[vic_forest_intersect[[i]], ] %>%
+    filter(AREASQM == max(AREASQM)) # if >1 forest; choose only largest forest
+  
+  if(nrow(intersect_row_loop) == 0){
+    large_vic_forest_intersect_sf <- rbind(large_vic_forest_intersect_sf,
+                                        intersect_row_loop[2,])
+  }
+  else{
+    large_vic_forest_intersect_sf <- rbind(large_vic_forest_intersect_sf,
+                                           intersect_row_loop)
+  }
+}
+
+# --- delete storage row
+large_vic_forest_intersect_sf <- large_vic_forest_intersect_sf[-1,]
+
+large_vic_forest_intersect_sf <- large_vic_forest_intersect_sf %>% 
+  # create `forest` variable: 1 if forest exist in cell// 0 otherwise
+  mutate(forest = case_when(
+    is.na(FTYPE) ~ 0,
+    !is.na(FTYPE) ~ 1
+  )) %>% 
+  # create id column
+  mutate(id = 1:400,
+         .before = FTYPE) %>% 
+  # select relevant variables
+  dplyr::select(id, f_type = FTYPE, f_area_sqm = AREASQM, f_hectares = HECTARES, f_desc = X_DESC, forest)
+
+# drop geometry & select relevant columns to join
+large_vic_forest_intersect_df <- large_vic_forest_intersect_sf %>% 
+  dplyr::select(-f_type, # forest type (numeric) *160 different f_types
+                -f_area_sqm, # forest area (square metres)
+                -f_hectares) %>%  # forest hectares
+  sf::st_set_geometry(NULL)
+```
+    
+    `large_vic_forest_intersect_df` variables
+- `id`: raster cell id
+- `f_desc`: forest description
+- `forest`: 1(forest exist in that cell) or 0 (forest don't exist)
+
+
+```{r}
+# --- plot forest data
+
+# plot raster cells
+tmap::tm_shape(vic_raster_crop_sf) +
+  tmap::tm_polygons(alpha = 0.4) +
+  # plot outline of Victoria
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  # plot `vic_forest` polygons
+  tmap::tm_shape(vic_forest) +
+  tmap::tm_polygons(col = "X_DESC",
+                    alpha = 0.4) +
+  tmap::tmap_options(max.categories = 40)
+```
+
+
+## upper soil moisture
+
+    Actual upper soil moisture
+- [data source](http://www.bom.gov.au/water/landscape/#/sm/Actual/month/-26.32/132.54/3/Point/Separate/-15.6/130.25/2021/4/30/)
+  - with map 
+*relative upper soil moisture; also avail.
+
+```{r}
+# --- read in data
+usm_nc <- ncdf4::nc_open(here::here("data/usm/s0_pct_Actual_month.nc"))
+
+# --- print metadata in .txt file
+{
+  sink(here::here("data/usm/s0_pct_Actual_month_metadata.txt"))
+}
+```
+
+```{r}
+# ========== read in ==========
+usm_raster_brick <- raster::brick(here::here("data/usm/s0_pct_Actual_month.nc"),
+                                  ncdf = T,
+                                  varname = "s0_pct")
+
+read_bomwater_func <- function(var){
+  
+  # --- read in `RasterBrick` from .nc file
+  var_raster_brick <- raster::brick(here::here(paste0("data/usm/s0_pct_Actual_month.nc")),
+                                    ncdf = T,
+                                    varname = var)  
+  
+  # --- `crop` & `mask` raster; to Victoria map
+  var_raster_crop <- var_raster_brick %>% 
+    # make bounding box; to Vic map
+    raster::crop(vic_map_sp) %>% 
+    # set all cells; NOT in Victoria NA
+    raster::mask(mask = vic_map_sp)
+  
+  # --- set same resolution as `vic_raster_crop` (20x20 for now)
+  # average values of smaller cells in large cell
+  var_raster_crop <- raster::resample(var_raster_crop, vic_raster_crop,
+                                      method = "bilinear")
+  
+  return(var_raster_crop)
+}
+
+s0_pct_raster_crop <- read_bomwater_func("s0_pct")
+
+s0_pct_df <- s0_pct_raster_crop %>% 
+  as.data.frame(xy = T) %>% 
+  mutate(id = 1:nrow(.),
+         var = "s0_pct",
+         .before = x)  
+  
+s0_pct_df <- s0_pct_df %>% 
+  pivot_longer(cols = X2000.01.31:X2021.10.25,
+               names_to = "date",
+               values_to = "values") %>% 
+  # change `chr` date to `date` format
+  mutate(date = str_remove_all(string = date,
+                               pattern = "X")) %>% 
+  # add year & month column
+  mutate(date = lubridate::ymd(date)) %>% 
+  mutate(year = lubridate::year(date),
+         month = lubridate::month(date)) %>% 
+  dplyr::select(-date)
+
+s0_pct_df_wide <- s0_pct_df %>% 
+  pivot_wider(names_from = var,
+              values_from = values)
+```
+
+
+    BOM's Water Balance & hydrological variables
+- [data source](http://www.bom.gov.au/water/landscape/#/sm/Actual/month/-26.32/132.54/3/Point/Separate/-15.6/130.25/2021/4/30/)
+  - with map 
+*relative upper soil moisture; also avail.
+
+- downloaded `usm`: upper soil moisture 
+
+## Consolidating ALL data!
+
+```{r, eval=FALSE}
+# --- see which year & month don't match with era & SILO data
+setdiff(silo_df_monthly %>% distinct(year, month) %>% mutate(ym = paste(year, month, sep = "-")) %>% pull(ym), era_df %>% distinct(year, month) %>% mutate(ym = paste(year, month, sep = "-")) %>% pull(ym))
+```
+
+
+
+```{r}
+join_sf <- ignition_rasterize_cluster_sf_month %>% 
+  # SILO data
+  left_join(silo_df_monthly_wide,
+            by = c("id", "year", "month")) %>% 
+  # ERA data
+  left_join(era_df_wide,
+            by = c("id", "year", "month")) %>% 
+  # actual upper soil moisture
+  left_join(s0_pct_df_wide,
+            by = c("id", "year", "month")) %>% 
+  # `vic_forest` data
+  left_join(large_vic_forest_intersect_df,
+            by = "id")  
+  
+
+join_sf <- join_sf %>% 
+  # rename x y (cell centroids)
+  # rename(x = x.x,
+  #        y = y.x) %>% 
+  dplyr::select(-x.y, -y.y, -x.x, -y.x)
+```
+
+## model data set
+```{r}
+model_sf <- join_sf %>% 
+  mutate(id = factor(id), # grid cell 
+         forest = factor(forest, # whether forest exist in that cell
+                         levels = c(0, 1))) %>% 
+  # --- remove variables; not used for modelling
+  dplyr::select(
+    # cell centroid
+    -x,
+    -y,
+    -f_desc # forest description
+    ) 
+
+model_df <- model_sf %>% 
+  sf::st_set_geometry(NULL) %>% # remove geometry
+  as_tibble()
+
+model_df <- model_df %>% 
+  # replace NaN with NA
+  mutate(across(.cols = everything(),
+                .fns = ~replace(.x, is.nan(.x), NA)))  
+
+# --- write `model_df` as csv 
+readr::write_csv(model_df,
+                 file = here::here("data/model_df")) 
+```
+
+
+# eda plots
+
+```{r}
+# --- count; no. of fires; in each cell id
+join_sf %>%
+  as_tibble() %>%
+  group_by(id) %>%
+  summarise(sum(fire_count))
+
+# --- count; no. of fires; in `forest`
+join_sf %>% 
+  as_tibble() %>% 
+  group_by(forest) %>% 
+  summarise(sum(fire_count)) 
+```
+
+
+## `fire_count` vs. predictors
+```{r}
+# `fire_count` vs. `daily_rain`
+model_df %>% 
+  ggplot(aes(x = daily_rain,
+             y = fire_count)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `et_short_crop`
+model_df %>% 
+  ggplot(aes(x = et_short_crop,
+             y = fire_count)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `max_temp`
+model_df %>% 
+  ggplot(aes(x = max_temp,
+             y = fire_count)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `radiation`
+model_df %>% 
+  ggplot(aes(x = radiation,
+             y = fire_count)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `rh`
+model_df %>% 
+  ggplot(aes(x = rh,
+             y = fire_count)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `si10`
+model_df %>% 
+  ggplot(aes(x = si10,
+             y = fire_count)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `lai_hv`
+model_df %>% 
+  ggplot(aes(x = lai_hv,
+             y = fire_count)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `lai_lv`
+model_df %>% 
+  ggplot(aes(x = lai_lv,
+             y = fire_count)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+model_df
+
+# --- `fire_count` vs. `id`
+model_df %>% 
+  ggplot() +
+  geom_boxplot(aes(x = factor(id),
+                   y = fire_count)) +
+  theme_bw()
+
+# --- `fire_count` vs. `forest_type`
+model_df %>% 
+  ggplot() +
+  geom_col(aes(x = forest,
+               y = fire_count)) +
+  theme_bw()
+```
+## `log(fire_count)` vs. predictors
+```{r}
+# `log(fire_count + 1)` vs. `daily_rain`
+model_df %>% 
+  ggplot(aes(x = daily_rain,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `et_short_crop`
+model_df %>% 
+  ggplot(aes(x = et_short_crop,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `max_temp`
+model_df %>% 
+  ggplot(aes(x = max_temp,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `radiation`
+model_df %>% 
+  ggplot(aes(x = radiation,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `rh`
+model_df %>% 
+  ggplot(aes(x = rh,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `si10`
+model_df %>% 
+  ggplot(aes(x = si10,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `lai_hv`
+model_df %>% 
+  ggplot(aes(x = lai_hv,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `lai_lv`
+model_df %>% 
+  ggplot(aes(x = lai_lv,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# `fire_count` vs. `s0_pct`
+model_df %>% 
+  ggplot(aes(x = s0_pct,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+# --- `fire_count` vs. `id`
+model_df %>% 
+  ggplot() +
+  geom_boxplot(aes(x = factor(id),
+                   y = log(fire_count + 1))) +
+  theme_bw()
+
+# --- `fire_count` vs. `forest_type`
+model_df %>% 
+  ggplot() +
+  geom_col(aes(x = forest,
+               y = fire_count)) +
+  theme_bw()
+```
+
+```{r}
+# --- plot `fire_count` vs. `year_month` 
+model_df %>% 
+  mutate(ym = paste(year, month, sep = "_")) %>% 
+  ggplot() +
+  geom_boxplot(aes(x = ym,
+                   y = fire_count)) +
+  facet_wrap(~id,
+             nrow = 20) +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+
+
+## `fire_count` maps
+```{r}
+# --- toggle between interactive & static map
+tmap::ttm()
+
+# --- map of overall fire ignitinos
+join_sf %>% 
+  group_by(id) %>% 
+  summarise(fire_count = sum(fire_count)) %>% 
+  tmap::tm_shape(.) +
+  
+  tm_polygons(col = "fire_count",
+              id = "id",
+              style = "cont",
+              palette = "YlOrRd",
+              alpha = 0.4) +
+  
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+    187 cells; have 0 `fire_count`
+
+```{r}
+join_sf %>% 
+  mutate(ym = paste(year, month, sep = "-"),
+         .before = year) %>% 
+  tmap::tm_shape(.) +
+  tm_polygons(col = "fire_count",
+              id = "id",
+              style = "cont",
+              palette = "YlOrRd",
+              legend.show = F) +
+  tmap::tm_facets(by = "ym") +
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) 
+```
+
+# Modelling
+
+
+## create lag variables
+```{r}
+model_df2 <- model_df %>% 
+  group_by(id) %>% 
+  # compute 1st lag
+  mutate(across(.cols = daily_rain:s0_pct,
+                .fns = ~lag(.x),
+                .names = "{.col}_1")) %>% 
+  # compute 2nd lag
+  mutate(across(.cols = daily_rain:s0_pct,
+                .fns = ~lag(.x, 
+                            n = 2),
+                .names = "{.col}_2")) 
+```
+
+## Random forest model (regression)
+```{r}
+library(tidymodels)
+rpart_mod <- decision_tree(cost_complexity = 0.003) %>% 
+  set_engine("rpart") %>% 
+  set_mode("regression") %>% 
+  translate()
+
+
+rf_fit <- rpart_mod %>% 
+  parsnip::fit(fire_count ~ .,
+               data = model_df %>% dplyr::select(-id, -year, -month))
+
+rpart.plot::rpart.plot(rf_fit$fit)
+```
+
+
+```{r}
+model_df %>% 
+  dplyr::select(-id) %>% 
+  GGally::ggduo()
+```
+
+## lasso regression
+
+### training & test split
+```{r}
+# --- lasso regression; cannot handle NA values
+model_df2 <- model_df2 %>% 
+  na.omit()
+
+# --- exclude 2020 Oct-Dec & 2021 Jan-Mar for test set
+train <- model_df2 %>% 
+  filter(!(year == 2021 & month %in% c(1, 2, 3) | year == 2020 & month %in% c(10, 11, 12))) %>%  
+  arrange(id) 
+
+test <- model_df2 %>% 
+  filter(year == 2021 & month %in% c(1, 2, 3) | year == 2020 & month %in% c(10, 11, 12)) %>%  
+  arrange(id) 
+
+# --- create training & test set
+split <- rsample::initial_time_split(data = bind_rows(train, test),
+                                     prop = nrow(train) / (nrow(train) + nrow(test)))
+
+# --- train: `rsplit` object
+train <- rsample::training(split)
+test <- rsample::testing(split)
+```
+
+### data pre-processing with `recipes`
+```{r}
+# --- create a recipe
+fire_rec <- recipes::recipe(formula = fire_count ~ .,
+                            data = model_df2) %>% 
+  # remove `year` & `month` *not used
+  recipes::step_select(-c(year, month)) %>% 
+  
+  # set `id` as `ID` role (not a predictor) * but keep in data
+  recipes::update_role(id,
+                       new_role = "ID") %>% 
+  
+  # remove predictors with 0 variance
+  recipes::step_zv(all_numeric(),
+                   -all_outcomes()) %>% 
+  
+  # mean normalise (center & scale) *required in lasso reg.
+  recipes::step_normalize(all_numeric(),
+                          -all_outcomes()) %>% 
+  
+  step_log(all_outcomes(),
+           offset = 1) %>%  # + 1; to avoid log 0 
+  
+  # remove NA values *can't be handled in lasso reg.
+  recipes::step_naomit(all_predictors(),
+                       skip = T) %>% 
+  
+  step_dummy(forest)
+  
+
+fire_prep <- fire_rec %>% 
+  prep(strings_as_factors = F)
+```
+
+
+### specify lasso regression model + create workflows `object`
+```{r}
+# --- lasso reg. model specification
+lasso_spec <- parsnip::linear_reg(penalty = 0.1,
+                                  mixture = 1) %>% # lasso reg.
+  parsnip::set_engine("glmnet")
+```
+
+```{r}
+# --- create a workflow
+wf <- workflows::workflow() %>% 
+  # add `recipes` (data preprocessing step)
+  workflows::add_recipe(fire_rec)
+
+lasso_fit <- wf %>% 
+  workflows::add_model(lasso_spec) %>% 
+  fit(data = train)
+
+lasso_fit %>% 
+  # extract model fit
+  workflows::extract_fit_parsnip() %>% 
+  broom::tidy()
+```
+
+### tune penalty term ($\lambda$)
+```{r}
+# --- set seed for reproducibility
+set.seed(1234)
+
+# --- create 25 bootstrap samples
+fire_folds <- rsample::vfold_cv(model_df2 %>% na.omit,
+                               v = 5)
+```
+
+```{r}
+# --- model specification (with penalty term to tune)
+tune_spec <- parsnip::linear_reg(penalty = tune(), # tune penalty placeholder
+                                 mixture = 1) %>%  # lasso reg.
+  parsnip::set_engine("glmnet")
+```
+
+```{r}
+# --- grid of penalty values
+lambda_grid <- dials::grid_regular(dials::penalty(range = c(-10, 0), # default
+                                                  trans = scales::log10_trans()), # transformation *`trans` object from `scales` package
+                                   levels = 50)
+```
+
+```{r}
+# --- run model tuning via grid search
+
+# do parallel processing (use all computer's core)
+doParallel::registerDoParallel()
+
+set.seed(2021)
+
+# --- model tuning; via grid search
+lasso_grid <- tune::tune_grid(
+  object = wf %>% add_model(tune_spec), # `workflow` object 
+  
+  resamples = fire_folds, # across 10 folds
+  
+  grid = lambda_grid # over each \lambda value in `lambda_grid`
+)
+
+lasso_grid %>% 
+  # obtain tuning results; across performance metrics (`.estimator`)
+  tune::collect_metrics() %>% 
+  # plot
+  ggplot(aes(x = penalty,
+             y = mean,
+             colour = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err)) +
+  geom_line(size = 1.5) +
+  # facet by `.metric`
+  facet_wrap(~ .metric,
+             scales = "free",
+             nrow = 2) +
+  # penalty in log10 scale
+  scale_x_log10() +
+  theme_bw() +
+  theme(legend.position = "none")
+  
+lowest_rmse <- lasso_grid %>% 
+  tune::select_best(metric = "rmse",
+                    maximise = F)
+
+final_lasso <- tune::finalize_workflow(x = wf %>% add_model(tune_spec),
+                                       parameters = lowest_rmse)
+
+# --- plot variable importance
+final_lasso %>% 
+  fit(train) %>% 
+  # extract model fit
+  workflows::extract_fit_parsnip() %>% 
+  # compute variable importance scores for predictors
+  vip::vi(lambda = lowest_rmse$penalty) %>% 
+  # absolute `Importance`; for plotting
+  mutate(Importance = abs(Importance)) %>% 
+  # plot 
+  ggplot(aes(x = Importance,
+             y = fct_reorder(Variable,
+                             Importance),
+             fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(y = NULL) +
+  theme_bw()
+
+final_lasso %>% 
+  fit(train) %>% 
+  # extract model fit
+  workflows::extract_fit_parsnip() %>% 
+  # --- extract coefs. in `tidy` table
+  broom::tidy() 
+```
+
+```{r}
+model_df2 %>% 
+  ggplot(aes(x = et_short_crop_2,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+
+model_df2 %>% 
+  ggplot(aes(x = max_temp,
+             y = log(fire_count + 1))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+```
+
+## Count models
+```{r}
+stats::glm(fire_count ~ . -id -year -month,
+           family = poisson(link = "log"),
+           model_df2) %>% 
+  summary()
+
+pscl::hurdle(fire_count ~ . -id -year -month,
+             data = model_df2) %>% 
+  summary()
+
+pscl::zeroinfl(fire_count ~ . -id -year -month,
+               data = model_df2) %>% 
+  summary()
+```
+
+```{r}
+ignition_rasterize_cluster_sf_month %>% 
+  sf::st_set_geometry(NULL) %>% 
+  group_by(id) %>% 
+  summarise(fire_count = sum(fire_count)) %>% 
+  count(fire_count) %>% 
+  arrange(-fire_count)
+
+ignition_rasterize_cluster_sf_month %>% 
+  sf::st_set_geometry(NULL) %>% 
+  group_by(id) %>% 
+  summarise(mean_fire_count = mean(fire_count)) %>% 
+  arrange(-mean_fire_count)
+```
+
+
+
+
+
