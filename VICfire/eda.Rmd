@@ -620,7 +620,7 @@ sim_count_sp <- sim_count %>%
   rename(lon = x,
          lat = y,
          sim_id = V3) %>%
-  select(-sim_id) %>% # cannot have `sim_id` when `rasterize`
+  dplyr::select(-sim_id) %>% # cannot have `sim_id` when `rasterize`
   # convert to `sp` object
   sp::SpatialPoints()
 
@@ -1359,7 +1359,7 @@ p1 / p2
 ```{r, eval=FALSE}
 cause_join_count_bf_season %>% 
   filter(bf_season %in% unique(cluster_16_21_count_bf_season$bf_season)) %>% 
-  select(bf_season, total) %>% 
+  dplyr::select(bf_season, total) %>% 
   # join cluster & join data counts
   right_join(cluster_16_21_count_bf_season,
             by = "bf_season") %>% 
@@ -1562,13 +1562,13 @@ ignition_rasterize_cluster_sf_month <- purrr::map2_df(.x = unique_year_month_df 
 
 ## read ERA5 data
 ```{r}
-era_nc <- ncdf4::nc_open(here::here("data/era5/era5.nc"))
+era_nc <- ncdf4::nc_open(here::here("VICfire/data/era5/era5.nc"))
 ```
 
 ```{r, eval=FALSE}
 # --- print metadata into text file
 {
-  sink(here::here("data/era5/era_nc_metadata.txt"))
+  sink(here::here("VICfire/data/era5/era_nc_metadata.txt"))
   print(era_nc)
   sink()
 }
@@ -1602,7 +1602,7 @@ for(i in 1:length(era_var_names)){
   var <- era_var_names[i]
   
   # --- create rasterbrick object; for each variable  
-  var_raster_brick <- raster::brick(here::here("data/era5/era5.nc"),
+  var_raster_brick <- raster::brick(here::here("VICfire/data/era5/era5.nc"),
                                     ncdf = T,
                                     varname = var)
   
@@ -1773,7 +1773,7 @@ era_cluster_join_df <- era_cluster_join_df %>%
 ## Model
 ```{r, eval=FALSE}
 era_cluster_join_model_df <- era_cluster_join_df %>% 
-  select(-x, -y, -date)
+  dplyr::select(-date)
 
 era_cluster_join_model_df <- era_cluster_join_model_df %>% 
   # factorise id// month// year
@@ -1786,7 +1786,7 @@ era_cluster_join_model_df <- era_cluster_join_model_df %>%
 
 era_cluster_join_model_df %>% 
   na.omit() %>% 
-  select(-id) %>% 
+  dplyr::select(-id) %>% 
   GGally::ggpairs()
 ```
 
@@ -1808,7 +1808,7 @@ stats::lm(fire_count ~ . -id,
   summary()
   
 era_cluster_join_model_df <- era_cluster_join_model_df %>% 
-  select(-c(cvh, lai_hv, lai_lv, cvl, slt, tvh, tvl))
+  dplyr::select(-c(cvh, lai_hv, lai_lv, cvl, slt, tvh, tvl))
 
 lme4::lmer(fire_count ~ . - id + (year | id),
            data = era_cluster_join_model_df) %>% 
@@ -1820,10 +1820,40 @@ lme4::lmer(fire_count ~ . - id + (year | id),
 ```
 
 
+## road distance
+-- notes: the shp file is too large to be pushed to github so instead, we wrote the file to csv "ERA5_withroad.csv" and it can be found in the data folder. 
+```{r, eval = FALSE}
+road <- st_read(here::here("VICfire/data/australia-latest-free.shp/gis_osm_roads_free_1.shp"))
+
+roads_in_vic <- st_intersects(vic_map$geometry, road$geometry)
+road <- road[roads_in_vic[[1]],]
+rm(roads_in_vic)
+```
+
+```{r, eval = FALSE}
+era5_temp <- st_as_sf(era_cluster_join_model_df, coords = c("x", "y"), crs = 4326)
+nearest_index <- st_nearest_feature(era5_temp$geometry, road$geometry)
+temp <- st_distance(era5_temp$geometry, road$geometry[nearest_index], by_element = TRUE)
+era_cluster_join_model_df$dist_road <- as.numeric(temp)
+rm(road, era5_temp)
+```
+
+```{r, eval = FALSE}
+#writing the fle to csv
+write_csv(era_cluster_join_model_df, "data/ERA5_withroad.csv")
+```
+
+```{r}
+# reading the data with dist_road
+ERA5_withroad <- read.csv(here::here("VICfire/data/ERA5_withroad.csv"))
+```
+
 
 ## read in forest data
+-- need to check if this forest data is reliable considering that it is from 2018. some forest areas might be burned from previous bushfires--
+
 ```{r}
-vic_forest <- sf::st_read(here::here("data/vic_forest/FORTYPE500.shp"))
+vic_forest <- sf::st_read(here::here("VICfire/data/vic_forest/FORTYPE500.shp"))
 
 vic_forest %>% 
   as_tibble() %>% 
@@ -1834,9 +1864,81 @@ vic_forest %>%
 ```
 
 
+```{r}
+forest <- raster(here::here('VICfire/data/aus_for18_publish/aus_for18_publish/aus_for18/z001001.adf'))
+
+ERA5_withroad <- ERA5_withroad %>%
+  rename(lon = x,
+         lat = y)
+
+# project to EPSG:3577
+fire_points <- SpatialPoints(dplyr::select(ERA5_withroad, lon, lat), proj4string=CRS("+proj=longlat +datum=WGS84")) %>%
+  spTransform(projection(forest))
+
+# extract ID of rectangles
+fire_forest_index <- extract(forest, fire_points)
+
+
+# access attributes in forest 2018
+fire_forest_info <- levels(forest) %>%
+  as.data.frame()
+
+fire_forest_info <- fire_forest_info %>%
+  .[fire_forest_index,] %>%
+  as_tibble()
+
+# join back to the dataset
+for (variable in names(fire_forest_info)){
+  ERA5_withroad[[variable]] <- fire_forest_info[[variable]]
+}
+```
+
+```{r}
+# checking for missing values \
+library(visdat)
+ERA5_withroad %>% vis_miss()
+```
+some of the data in the forest data has missing values (16% in total of NAs), which is quite a lot.
+
+```{r}
+au_map <- ne_states(country = 'Australia', returnclass = 'sf')
+vic_map <- au_map[7,]
+
+vic_map_sf <- vic_map %>%
+  st_as_sf(coords = c("lon", "lat"))
+
+ERA5_NA <- ERA5_withroad %>%
+  mutate(value = case_when(!is.na(FOREST) ~ 1,
+                           is.na(FOREST) ~ 0)) %>%
+  dplyr::select(lon, lat, value)
+
+NA_raster <- rasterFromXYZ(ERA5_NA)
+
+tm_shape(NA_raster$value) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+The missing values are on the boundaries of Victoria. Therefore, we can remove these values. (?)
+
+```{r}
+# filtering out the NA values
+ERA5_filtered <- ERA5_withroad %>%
+  filter(!is.na(FOREST))
+```
+
+```{r}
+# writing to csv
+write.csv(ERA5_filtered, "data/era5_withroad_forest")
+```
+
+
 ## read in weather stations data
 ```{r}
-weather_station <- sf::st_read(here::here("data/weather_station/WEATHSTN100.shp"))
+weather_station <- sf::st_read(here::here("VICfire/data/weather_station/WEATHSTN100.shp"))
 ```
 
   
@@ -1848,14 +1950,19 @@ weather_station <- sf::st_read(here::here("data/weather_station/WEATHSTN100.shp"
 * [metadata url](file:///Users/brenwin/Desktop/bushyr-main/VICfire/data/weather_station/metadata/ANZVI0803002549.html)
 * [download link](https://discover.data.vic.gov.au/dataset/observation-and-automatic-weather-stations)
 
-    
-    Variables
-    
-- `DATETIME`
-- `LAND_AWS55`
-- `STATION_ID`
-- `CODE`
-- `NAME`
-- `ELEVATION`
-- `DATETIME`
+
+## creating lags
+--- NEED TO HAVE THE DAILY DATA---
+
+
+## modeling
+### simple linear model
+```{r}
+linearmodel <- lm(fire_count ~ .-id, data = ERA5_withroad)
+summary(linearmodel)
+```
+R-squared: 55% - not a really good model
+
+
+
 
