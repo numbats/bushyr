@@ -368,3 +368,14 @@ y2 <- data_lagged_omitted$fire_count
 tuneRF(x2, y2)
 ```
 
+## writing the data to csv files
+```{r}
+# the lag data
+write.csv(data_lagged, here::here("VICfire/data/final_data_lag.csv"))
+
+# the non-lag data
+write.csv(data2, here::here("VICfire/data/final_data.csv"))
+```
+
+
+
