@@ -48,7 +48,7 @@ Sys.setlocale("LC_ALL","English")
 # IDEAS Challenge
 
 
-*Motivation*: Spatio-temporal visualisation and analysis of emergency call data. This is private so the bushfire data was collected because it has some similar form and structure.
+*Motivation*: The collaboration would develop risk models and visualisations, to monitor potential fire ignitions and track fires from satellite hotspots, in real-time, for the 2021-2022 Victorian bushfire season. These will be made these publicly available by extending the existing web app.
 
 *Team*:
 
