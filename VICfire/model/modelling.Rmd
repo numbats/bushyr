@@ -306,17 +306,104 @@ ggplot(augment_glm, aes(x = .fitted,
 RF does not work with NAs. With NAs, rf will omit the NAs or impute the values. imputing the values wont work in this case. 
 
 #### with lagged variables
+-- month as factor?
 ```{r}
 # omitting the NAs
-data_lagged_omitted <- data_lagged %>% na.omit()
+data_lagged_omitted <- data_lagged %>% na.omit() %>%
+  mutate(month = as.factor(month))
 
 set.seed(2021)
 rand1 <- randomForest(log(fire_count+1) ~ .-year -id, data = data_lagged_omitted, importance = TRUE, mtry = 6, ntree = 500) 
 rand1
 ```
 MSE looks good?
-MSE: 0.1638
-% var explaned: 40.39%
+MSE: 0.161
+% var explaned: 41.08%
+
+
+#### predicted values
+the predicted values of our random forest model would be based on the average fitted values.
+
+
+
+```{r}
+predicted_values <- as.data.frame(rand1$predicted) %>% rename(`pred` = `rand1$predicted`)
+predicted_data <- data_lagged_omitted %>% 
+  bind_cols(predicted_values)
+```
+
+```{r}
+dataframe <- data.frame(id = 1:400) 
+
+pred_oct <- predicted_data %>% 
+  dplyr::filter(month == 10) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_oct <- dataframe %>%
+  left_join(pred_oct) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_nov <- predicted_data %>% 
+  dplyr::filter(month == 11) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_nov <- dataframe %>%
+  left_join(pred_nov) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_dec <- predicted_data %>% 
+  dplyr::filter(month == 12) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_dec <- dataframe %>%
+  left_join(pred_dec) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_jan <- predicted_data %>% 
+  dplyr::filter(month == 1) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_jan <- dataframe %>%
+  left_join(pred_jan) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_feb <- predicted_data %>% 
+  dplyr::filter(month == 2) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_feb <- dataframe %>%
+  left_join(pred_dec) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_mar <- predicted_data %>% 
+  dplyr::filter(month == 3) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_mar <- dataframe %>%
+  left_join(pred_mar) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+```
+
+predicted counts are mostly 0? is this good?
+
 
 ```{r}
 importance(rand1)

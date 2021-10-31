@@ -717,7 +717,7 @@ df1 <- df1 %>%
 ```
 
 
-```{r, include = FALSE}
+```{r, eval = FALSE}
 # hotspot data
 hotspot2017_2 <- hotspot2017
 coordinates(hotspot2017_2) <- c("lon", "lat")
@@ -891,7 +891,8 @@ joined_all %>%
              y = n)) +
   geom_bar(aes(fill = type), position = "dodge", stat = "identity") +
   ggtitle("Comparison with clustering") +
-  facet_grid(~period)
+  facet_grid(~period) +
+  ylab("Number of fires")
 ```
 - significant hotspot data in jan and march 2017 (check whats happening)
 - overall, there are more training data except for some times
