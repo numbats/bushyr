@@ -1,0 +1,313 @@
+---
+title: "ETC5543_report"
+author: "Helen & Brenwin"
+date: "30/10/2021"
+output: 
+  bookdown::html_document2:
+    number_sections: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+# --- load libraries
+library(tidyverse)
+library(patchwork)
+library(tmap)
+library(knitr)
+library(kableExtra)
+```
+
+# Introduction
+
+```{r load-data}
+load(here::here("data/eda.Rdata"))
+load(here::here("data/ida.Rdata"))
+```
+
+
+Bushfires is a common and natural phenomenon that occurs frequently in many places around the world. Victoria however, is one of the most fire-prone region in the world, given its fire conducive weather and fuel conditions. Fire ignitions are most commonly caused naturally by lightning or can also be man-made such as through planned burning off, accidents or arson. 
+
+This report condenses the research work on bushffire risk modelling done by Brenwin Ang and Helen Evangelina as part of their internship for ETC5543 Business Analytics Creative Acitivity coursework. An extension to the work done by Di Cook, Emily Dodwell and Patrick Li on hotspot clustering algorithm. The overall goal to develop a Shiny web application and process to predict bushfire risk across Victoria, Australia. The github repository including Patrick's thesis can be found [here](https://github.com/numbats/bushyr).
+
+The resulting app seeks to improve accessibility to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change.
+
+# Motivation
+
+Effective bushfire management pivots around providing relevant and timely data to emergency management personnel and the public. In the past, we could only rely on ground intelligence and communication to detect fire. Harnessing satellite-enabled data can potentially enhance our preventative management techniques through early bushfire detection. Especially with its high temporal resolution over large areas. 
+
+The project uses empirical evidence-based method to identify weather and landscape variables that are conducive to start a bushfire. And using those variables to predict a bushfire risk index across Australia into an app. 
+
+
+# EDA
+
+## Map of Victoria
+```{r vic_grid, fig.cap="Victoria bounding box gridded 20 by 20"}
+# --- make tmaps interactive
+tmap::tmap_mode("view")
+
+# --- plot Victoria map; in 20x20 grid cells
+as(vic_raster_crop_values_join$id, "SpatialPolygonsDataFrame") %>% # random raster; with Victoria bbox
+  sf::st_as_sf() %>% 
+  tmap::tm_shape() +
+  tmap::tm_polygons(alpha = 0.3,
+                    id = "id") +
+  # --- draw outline of Victoria
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) + # line width
+  tmap::tm_layout(main.title = "Map of Victoria in 20x20 grid cells") +
+  tmap::tm_basemap(leaflet::providers$OpenStreetMap)
+```
+
+The following data analysis is based on the map of Victoria that is divided into 20x20 cells (shown above). Note that only cells within Victoria were considered. Our study also only focuses on bushfire seasons where most fire ignitions happen which is from October through to March and data from 2016 to 2021. 
+
+## Data and pre-processing
+
+### Fire ignitions data
+
+Fire ignitions are represented as spatial points on the map. There were two sources of bushfire ignitions data. 
+
+Firstly, hotspot satellite data from Himawari-8 satellite. Fire ignitions were detected using a clustering algorithm able to detect fires in real-time. (more information available in [Patrick's github](https://github.com/TengMCing/bushfire-paper)). Secondly, historical First Responder's data, this can be thought of as fires reported upon sight. That is, the First Respondent's data was based on where the first responder saw the fire. Most of these were reports from volunteers manning fire towers erected around Victoria. (see appendix for map of fire towers around Victoria). 
+
+```{r ignition-pts, fig.cap="fire ignitions represented as points on Victoria map"}
+# from eda's `cluster_map_facet_bf_season`
+cluster_map_bf_season <- ignition_rasterize_cluster_bf_season %>% 
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count)) %>% 
+  filter(bf_season == "2019-2020") %>% 
+  tmap::tm_shape(name = "cell fire ignition count") +
+  tmap::tm_polygons(col = "fire_count",
+                    id = "id",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
+                    palette = "YlOrRd",
+                    alpha = 0.4,
+                    colourNA = "grey",
+                    legend.show = F) + 
+  
+  # --- add ignition points (to buffer as necessary)
+  tmap::tm_shape(cluster_16_21_sf %>% filter(bf_season == "2019-2020"),
+                 name = "fire ignition points") +
+  tmap::tm_bubbles(# col = "cause",
+                   size = 0.3,
+                   alpha = 0.1,
+                   id = "") +
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- themes
+  tmap::tm_layout(legend.show = F) +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "number of bushfire ignitions across Victoria")
+
+cluster_map_bf_season
+```
+
+
+### Climate and landscape variables
+
+```{r var-tab}
+tibble::tribble(~source, ~variables, ~format, ~temporal_resolution,
+                "SILO (https://www.longpaddock.qld.gov.au/silo/)", "max_temp, rh, radiation, et_short_crop, daily_rain", "NetCDF", "daily",
+                
+                "ERA5 Reanalysis data (https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels-monthly-means?tab=overview)", "lai_hv, lai_lv, WS10", "NetCDF" ,"monthly",
+                
+                "BoM's AWRA-L (http://www.bom.gov.au/water/landscape/#/sm/Actual/month/-26.32/132.54/3/Point/Separate/-15.6/130.25/2021/4/30/)", "s0_pct", "NetCDF", "monthly",
+                
+                "Department of Environment, Land, Water and Planning (DELWP) (https://discover.data.vic.gov.au/dataset/forest-types-of-victoria)", "vic_forest", "ShapeFile", "Periodic") %>% 
+  knitr::kable(caption = "data source, variables, format and temporal resolution used in this study") %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+
+In this analysis, 11 variables are considered to identify their influence on bushfires. These variables are: maximum temperature (`max_temp`), relative humidity (`rh`), solar radiation (`radiation`), derived FAO56 short crop evapotranspiration rate in mm (`et_short_crop`), daily rainfall (`daily_rain`), leaf area index in high vegetation in $m^2 \ m^{-2}$ (`lai_hv`), leaf area index in low vegetation in $m^2 \ m^{-2}$  (`lai_lv`), 10m wind speed in $m\ s^{-1}$ (`WS10`) and  forest type in Victoria (`vic_forest`). All the variables were converted into monthly data by taking its mean. 
+
+All the spatial data are converted into gridded form (`raster`) to match the 20x20 gridded Victoria map in Figure \@ref(fig:vic_grid). To achieve this for numeric variables (all except `vic_forest`), since the resolution provided from the data sources were much finer than required, all the finer cells contained in the larger grid cell are averaged. For `vic_forest`, any cells that contains a forest is set to 1, 0 otherwise. An example for a the variable `max_temp` is shown in Figure \@ref(fig:max-temp). 
+
+
+```{r max-temp, fig.cap="Average max temperature for the month of May 2021"}
+max_temp_raster_crop %>% 
+  raster::reclassify(rcl = cbind(NA, 0)) %>% # reclassify NA values to 0
+  # raster -> spdf -> sf
+  as(., "SpatialPolygonsDataFrame") %>% 
+  sf::st_as_sf() %>%
+  dplyr::select(X2021.05.01:X2021.05.31) %>% 
+  # pivot_longer; change to tibble; since `pivot_longer` not compatible with `sf` yet
+  as_tibble() %>% 
+  mutate(id = 1:400,
+         .before = "X2021.05.01") %>% 
+  tidyr::pivot_longer(cols = X2021.05.01:X2021.05.31,
+                      names_to = "date",
+                      values_to = "max_temp") %>% 
+  # to `sf`
+  sf::st_as_sf() %>% 
+  group_by(id) %>% 
+  summarise(mean_max_temp = mean(max_temp)) %>% 
+  tmap::tm_shape(.,
+                 name = "max_temp cell") +
+  tm_polygons(col = "mean_max_temp",
+              alpha = 0.5) +
+  
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # line width
+  
+  tm_layout(main.title = "Map of Victoria in 20x20 grid cells") +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "Mean Max Temperature Across Victoria for May 2021")
+```
+
+
+# EDA
+
+## Discrepancy between Satellite and First Responder's data
+
+```{r fire-bf-month, fig.cap="number of fire ignitions against bushfire seasons(top) and month(bottom)"}
+# --- fire ignitions by bushfire season
+p1 <- cause_join_count_bf_season %>% 
+  filter(bf_season %in% unique(cluster_16_21_count_bf_season$bf_season)) %>% 
+  dplyr::select(bf_season, total) %>% 
+  # join cluster & join data counts
+  right_join(cluster_16_21_count_bf_season,
+            by = "bf_season") %>% 
+  rename(total_join = total.x,
+         total_cluster = total.y) %>% # fire ignitions; in clustering data (2016-2021)
+  distinct(bf_season,
+           .keep_all = T) %>% 
+  dplyr::select(-data) %>% 
+  pivot_longer(cols = total_join:total_cluster,
+               names_to = "data", # in join (historical(2000-2019) & sat(2019-2020))// cluster(2016-2021)
+               values_to = "n") %>% # no. of fire ignitions
+  ggplot() +
+  geom_col(aes(x = bf_season,
+               y = n,
+               fill = data),
+           position = "dodge",
+           width = 0.23) +
+  colorspace::scale_fill_discrete_qualitative(labels = c("clustering", "historical")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Fire ignitions by bushfire season",
+       x = "bushfire season",
+       y = "number of ignitions")
+
+
+# --- fire ignitions by month
+p2 <- left_join(cluster_16_21_count_month, cause_join_count_month,
+          by = c("bf_season", "month")) %>% 
+  rename(total_cluster = n.x,
+         total_join = n.y) %>% 
+  pivot_longer(cols = total_cluster:total_join,
+               names_to = "data",
+               values_to = "n") %>% 
+  ggplot() +
+  geom_col(aes(x = factor(month,
+                          levels = c(10, 11, 12, 1, 2, 3)),
+               y = n,
+               fill = data),
+           position = "dodge") +
+  facet_wrap(. ~ bf_season) + 
+  colorspace::scale_fill_discrete_qualitative(labels = c("clustering", "historical")) +
+  theme_bw() +
+  labs(title = "Fire ignitions each month facet by bushfire season",
+       x = "month",
+       y = "number of ignitions") 
+  
+
+p1 / p2 +
+  plot_layout(guides = "collect")
+```
+
+    bar plot comparison 
+Historical data is available from 2000 up to end of 2020 (note: 2019 data from January to March is missing). While satellite data can be obtained up till the present. The satellite data used here is the clustered satellite data. 
+
+This section compares the agreeableness between both datsets in of number of bushfire ignitions ("points") in each raster grid cell. As we can see, the fire ignitions data sets do not match up exactly largely due to **how** the data was collected.
+
+Number of ignitions in each data set is plotted against bushfire season (top) and month (bottom) in Figure \@ref(fig:fire-bf-month) above. The lack of agreeableness both the datasets is apparent. In particular, there were considerably more bushfire ignitions in 2016-2017 bushfire season in the clustering data especially in the months January to March. Meanwhile in 2017-2018, there were more observations in the historical data set except for March. 
+
+```{r}
+# join no. of fires per cell; for historical & cluster data
+dplyr::inner_join(ignition_rasterize_training_sf_bf_season, ignition_rasterize_cluster_bf_season %>% sf::st_set_geometry(NULL),
+           by = c("id", "bf_season")) %>%
+  rename(fire_count_training = fire_count.x,
+         fire_count_cluster = fire_count.y) %>% 
+  # compute difference = historical - cluster
+  mutate(diff = fire_count_training - fire_count_cluster) %>% 
+  mutate(diff = case_when(
+    diff == 0 ~ NA_real_,
+    TRUE ~ diff
+  )) %>% 
+  tmap::tm_shape(name = "fire_count diff") +
+  tmap::tm_polygons(col = "diff",
+                    palette = "RdBu",
+                    n = 6,
+                    group = "diff",
+                    id = "id",
+                    alpha = 0.6) +
+  # facet by bushfire season  
+  tmap::tm_facets(by = "bf_season",
+                  ncol = 1) +
+  
+  # include Vic map outline
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) +
+  
+  # baselayer
+  tmap::tm_basemap(leaflet::providers$OpenStreetMap)
+```
+
+    
+    
+    
+    Spatial distribution comparison 
+We also compared differences in the spatial distributions of ignitions in both the data sets by computing the difference in number of ignitions (points) contained within in cell i.e. historical ignitions - satellite ignitions per cell.
+
+The results is shown in the plot above. There is obvious differences in how the fire ignitions are scattered around the map. Historical data is more concentrated in the map while satellite data tend to be more scattered. There is also strikingly more observations near Melbourne CBD for historical data sets. Moreover, zooming in, we observe that most of ignitions observed in the historical data are highly accessible by road while places where there is a much larger number for satellite data are in the remote areas. This speaks to the fact that most ignitions are caused by lightning (https://theconversation.com/open-data-shows-lightning-not-arson-was-the-likely-cause-of-most-victorian-bushfires-last-summer-151912).
+
+
+    Conclusion
+There are a few hypothesis pertaining to the inaccuracies of the historical data. Firstly, it is difficult to distinguish the number of fires one observes with the naked eye. For the same reason, it is less accurate and more subjective to gauge the location of a fire. Recording bushfires in this manner also prevents remote areas from being surveyed. Equally important is that we might also need to check the consistency of fire tower manning at each station. Another thing to note is that the number of bushfires is significantly lower from October to November, this could be due to filtering the clustered satellite data to include only bigger fires. 
+
+
+
+
+
+
+# Conclusion 
+
+    3 key phases to combat wildfire - prevention and preparedness, response, recovery
+- this study; suggests; more emphasis can and should be placed on the first. 
+
+    With satellite technology; significantly improve our predictive capabilities  
+
+# Appendix 
+
+## Data Sources
+
+    SILO
+[`SILO`](https://www.longpaddock.qld.gov.au/silo/) is a database of Australian climate data from 1889 to current hosted by Queensland Department of Environment and Science (DES). It provides daily metereological datasets for a range of climate variables. The datasets are constructed from observational data obtained from the Bureau of Meteorology (BoM) and other suppliers. *more information on how data is constructed [here](https://www.longpaddock.qld.gov.au/silo/about/overview/).
+
+    ERA5 renalysis data
+ERA5 is the fifth generation European Centre for Medium-Range Weather Forecasts (ECMWF) reanlysis for global climate and weather. It also supplies data from 1979 onwards for a whole range of climate and weather data. 
+
+Reanalysis combines model data and observations across the world into a globally complete and consistent dataset using the laws of physics. *[link](https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels-monthly-means?tab=overview)
+
+    Victoria forest data
+Victoria forest vector data delineates Victorian forest types and its attributes referenced through a forest type code. Data can be downloaded from [dicover.data.vic.gov.au](https://discover.data.vic.gov.au/dataset/forest-types-of-victoria).
+
+
+    Surface soil moisture
+BoM's Australian Water Resources Landscale model provides an array of estimates depicting Austrlia's water balance including surface soil moisture, evapotranspiration among others. 
+
+## Fire towers in Victoria
+```{r}
+knitr::include_graphics(here::here("data/report/fire_towers.png"))
+```
+[Source](https://www.firelookoutsdownunder.com/Photos/Victoria/fire_towers_and_lookouts.pdf)
