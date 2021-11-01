@@ -10,18 +10,23 @@ library(tidyverse)
 library(zoo)
 library(raster)
 library(sp)
+library(broom)
+library(randomForest)
+library(tidymodels)
 ```
 
 ```{r}
-data <- read.csv(here::here("data/model_df"))
+data <- read.csv(here::here("VICfire/data/model_df.csv"))
 ```
 
 ```{r}
+# checking for missing values
 library(visdat)
 vis_miss(data)
 ```
 
 ```{r}
+# creating a raster for victoria
 vic_raster <- raster(
   # no. of rows & columns (directly linked to resolution of grid cell)
   nrows = 20,
@@ -37,20 +42,22 @@ vic_raster <- raster(
   crs = "+proj=longlat +datum=WGS84"
   )
 vic_raster[] <- 1:ncell(vic_raster)
+# creating the lon & lat for each cell id
 lonlat <- as.data.frame(coordinates(vic_raster)) %>%
   mutate(id = 1:400)
-lonlat
 ```
 
 ```{r}
+# joining the data with lat and lon
 data2 <-  data %>%
   left_join(lonlat, by = "id") 
 ```
 
 
 ## adding FOR_TYPE
-
-```{r}
+-- this is not going to be added to the model --
+```{r, eval = FALSE}
+# this is not in the data folder bcs file is too large
 forest <- raster(here::here('data/aus_for18_publish/aus_for18_publish/aus_for18/z001001.adf'))
 
 # project to EPSG:3577
@@ -75,14 +82,14 @@ for (variable in names(fire_forest_info)){
 }
 ```
 
-```{r}
+```{r, eval = FALSE}
 # checking for missing values \
 library(visdat)
 data2 %>% vis_miss()
 ```
 some of the data in the forest data has missing values (19.9% in total of NAs), which is quite a lot.
 
-```{r}
+```{r, eval = FALSE}
 library(rnaturalearth)
 library(sf)
 library(tmap)
@@ -109,7 +116,7 @@ tm_shape(NA_raster$value) +
 ```
 The missing values are on the boundaries of Victoria. Therefore, we can remove these values.
 
-```{r}
+```{r, eval = FALSE}
 # filtering out the NA values
 data2 <- data2 %>%
   filter(!is.na(FOREST))
@@ -124,7 +131,7 @@ data2 <- data2 %>%
 data_lagged <- data2 %>%
   arrange(id) %>%
   group_by(id) %>%
-  mutate(rain2 = (daily_rain + lag(daily_rain))/2,
+  mutate(rain2 = rollsumr(daily_rain, k = 2, fill = NA)/2,
          rain3 = rollsumr(daily_rain, k = 3, fill = NA)/3)
 ```
 putting it into the model, rain3 and rain6 are not significant? but why after adding rain12, rain6 and rain12 become significant.
@@ -133,8 +140,8 @@ putting it into the model, rain3 and rain6 are not significant? but why after ad
 ```{r}
 data_lagged <- data_lagged %>%
   group_by(id) %>%
-  mutate(et2 = rollsumr(et_short_crop, k = 2, fill = NA)/2,
-         et3 = rollsumr(et_short_crop, k = 3, fill = NA)/3)
+  mutate(et_short_crop2 = rollsumr(et_short_crop, k = 2, fill = NA)/2,
+         et_short_crop3 = rollsumr(et_short_crop, k = 3, fill = NA)/3)
 ```
 
 ### for max_temp
@@ -185,36 +192,48 @@ data_lagged <- data_lagged %>%
          lai_lv3 = rollsumr(lai_lv, k = 3, fill = NA)/3)
 ```
 
+### s0_pct
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(s0_pct2 = rollsumr(s0_pct, k = 2, fill = NA)/2,
+         s0_pct3 = rollsumr(s0_pct, k = 3, fill = NA)/3)
+```
+
+
 ## modeling
 ### simple linear model
 ```{r}
-lm <- lm(fire_count ~ .-id, data = data)
+# using count as the response
+lm <- lm(fire_count ~ .-id - year, data = data)
 summary(lm)
 ```
-without lag variables, important: month, daily_rain, et_short_crop, max_temp, radiation, si10, lai_hv, lai_lv, forest
 
 ```{r}
-linearmodel <- lm(log(fire_count+1) ~ .-id, data = data_lagged, na.action= na.exclude)
+# using log scale of count as the response
+lm_log <- lm(log(fire_count+1) ~ .-id - year, data = data)
+summary(lm_log)
+```
+
+```{r}
+# using the added lag variables
+linearmodel <- lm(log(fire_count+1) ~ .-id -x -y, data = data_lagged, na.action= na.exclude)
 summary(linearmodel)
 ```
-R-squared: 16.93% - not a good model
+R-squared: 14.51% - not a good model
 
 ### linear model with only significant variables
 ```{r}
-linearmodel2 <- lm(fire_count ~ x + y +month +et_short_crop + radiation + si10 + lai_lv + forest + rain2 +et2 + et3 + max_temp2 + max_temp3 + radiation2+ rh2 +si102 + si103 +  lai_hv2 + lai_hv3 + lai_lv2 + lai_lv3, data = data_lagged, na.action = na.exclude)
+linearmodel2 <- lm(log(fire_count+1) ~ month +et_short_crop + radiation + si10 + lai_lv + forest + rain2 +et_short_crop2 + et_short_crop3 + max_temp2 + max_temp3 + radiation2+ rh2 +si102 + si103 +  lai_hv2 + lai_hv3 + lai_lv2 + lai_lv3, data = data_lagged, na.action = na.exclude)
 summary(linearmodel2)
 ```
-```{r}
-linearmodel3 <- lm(fire_count ~ x + y +month +et_short_crop + radiation + si10 + lai_lv + forest + rain2 +et2 + et3 + max_temp2 + max_temp3 + radiation2+ rh2 +si102 + si103 +  lai_hv2 + lai_hv3 + lai_lv3, data = data_lagged, na.action = na.exclude)
-summary(linearmodel3)
-```
+Ajd R-squared: 14.27%
 
 ```{r}
-anova(linearmodel2, linearmodel3)
+anova(linearmodel, linearmodel2)
 ```
 If p-value > 0.05, do not rejetc null hypothesis that the smaller model is true --> smaller model is better. 
-- linearmodel2 is better than linearmodel
--linearmodel3 is better 
+- linearmodel is better than linearmodel2
 
 ### checking if the variables are linear
 ```{r}
@@ -257,18 +276,16 @@ data_lagged %>%
 
 ### glm 
 ```{r}
-data_glm <- data_omitted %>%
-  dplyr::select(-FOR_TYPE, -COVER, -HEIGHT, -x, -y)
-glm <- glm(fire_count ~ ., data = data_glm, family = poisson())
+glm <- glm(fire_count ~ . -id -x -y -year, data = data_lagged, family = poisson())
 summary(glm)
 ```
 - comparing with normal lm model:
 ```{r}
-lm2 <- glm(fire_count ~ ., data = data_glm, family = "gaussian")
+lm2 <- glm(fire_count ~ . -id -x -y -year, data = data_lagged, family = "gaussian")
 summary(lm2)
 ```
 
-both models have high deviance which indicates that the two models are not really a good model. But lm has way higher deviance, which means glm is better.
+both models have high deviance which indicates that the two models are not really a good model. But lm has way higher deviance, which means glm is better?
 
 - plotting the model:
 ```{r}
@@ -285,76 +302,143 @@ ggplot(augment_glm, aes(x = .fitted,
   geom_smooth()
 ```
 
-
-
 ### Random Forest 
 RF does not work with NAs. With NAs, rf will omit the NAs or impute the values. imputing the values wont work in this case. 
 
 #### with lagged variables
+-- month as factor?
 ```{r}
-data_lagged_omitted <- data_lagged %>% na.omit() %>% dplyr::select(-FOR_CODE, FOR_CAT)
+# omitting the NAs
+data_lagged_omitted <- data_lagged %>% na.omit() %>%
+  mutate(month = as.factor(month))
 
-library(randomForest)
-library(tidymodels)
 set.seed(2021)
-rfmodel <- rand_forest() %>%
-  set_engine("randomForest",
-             importance=TRUE, proximity=TRUE) %>%
-  set_mode("regression") %>%
-  fit(fire_count~ ., data= data_lagged_omitted)
-rfmodel
-```
-
-```{r}
-rand1 <- randomForest(log(fire_count+1) ~ ., data = data_lagged_omitted, importance = TRUE, mtry = 5, ntree = 500) 
+rand1 <- randomForest(log(fire_count+1) ~ .-year -id, data = data_lagged_omitted, importance = TRUE, mtry = 6, ntree = 500) 
 rand1
 ```
 MSE looks good?
+MSE: 0.161
+% var explaned: 41.08%
+
+
+#### predicted values
+the predicted values of our random forest model would be based on the average fitted values.
+
+
+
+```{r}
+predicted_values <- as.data.frame(rand1$predicted) %>% rename(`pred` = `rand1$predicted`)
+predicted_data <- data_lagged_omitted %>% 
+  bind_cols(predicted_values)
+```
+
+```{r}
+dataframe <- data.frame(id = 1:400) 
+
+pred_oct <- predicted_data %>% 
+  dplyr::filter(month == 10) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_oct <- dataframe %>%
+  left_join(pred_oct) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_nov <- predicted_data %>% 
+  dplyr::filter(month == 11) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_nov <- dataframe %>%
+  left_join(pred_nov) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_dec <- predicted_data %>% 
+  dplyr::filter(month == 12) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_dec <- dataframe %>%
+  left_join(pred_dec) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_jan <- predicted_data %>% 
+  dplyr::filter(month == 1) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_jan <- dataframe %>%
+  left_join(pred_jan) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_feb <- predicted_data %>% 
+  dplyr::filter(month == 2) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_feb <- dataframe %>%
+  left_join(pred_dec) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_mar <- predicted_data %>% 
+  dplyr::filter(month == 3) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_mar <- dataframe %>%
+  left_join(pred_mar) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+```
+
+predicted counts are mostly 0? is this good?
 
 
 ```{r}
 importance(rand1)
 varImpPlot(rand1)
 ```
-important variables: radiation, month, rain3, daily_rain, et_short_crop, rh3, id, rh, radiation2, rain2, rh2, et2,year, max_temp,  si10, max_temp3, radiation2, lai_lv3, radiation3, lai_lv
 
 --- with important variables ---- 
 ```{r}
+
 set.seed(2021)
-rand2 <- randomForest(log(fire_count+1) ~ radiation + month + daily_rain + rain3 + et_short_crop + id + rh + max_temp + rh3 + et2 + rain2 + year + si10 + max_temp3 + radiation2 + radiation3 + si103 + max_temp2, data = data_lagged_omitted, importance = TRUE) 
+rand2 <- randomForest(log(fire_count+1) ~ x + y + radiation + month + daily_rain + rain3 + et_short_crop + s0_pct + s0_pct3 + s0_pct2+ rh + max_temp + rh3 + et_short_crop2 + et_short_crop3 + rain2 + si10 + max_temp2 + radiation2 + radiation3 + si103 + max_temp2 + lai_lv3, data = data_lagged_omitted, importance = TRUE, mtry = 6) 
 rand2
 ```
-41.86%
-MSR 0.165
+41.36%
+MSR 0.1611
 
+the rf model with only the top important variables is slightly better than rf model using all of the variables. 
 
 forest surprisingly isnt significant?
 
 #### without lagged variables
 ```{r}
-data2_selected <- data2 %>% dplyr::select(-STATE, - FOR_SOURCE, -FOR_CAT, -COUNT, - FOR_CODE)
-```
-
-
-```{r}
-data_omitted <- data2_selected %>% na.omit()
-rand_ori <- randomForest(log(fire_count+1) ~ ., data = data_omitted, importance = TRUE) 
+data_omitted <- data2 %>% na.omit()
+rand_ori <- randomForest(log(fire_count+1) ~ . -id -year, data = data_omitted, importance = TRUE, mtry = 5) 
 rand_ori
 ```
 better than using the lagged data?
-% var explained: 42.98%, MSR: 0.154
+% var explained: 40.8%, MSR: 0.155
+
+should we look at MSR or % var explained?
 
 ```{r}
 importance(rand_ori)
 varImpPlot(rand_ori)
 ```
-
-```{r}
-rand_ori2 <- randomForest(log(fire_count+1) ~ month + radiation + year + daily_rain + id + rh + si10 + lai_hv + lai_lv + max_temp + et_short_crop + FOR_TYPE, data = data_omitted, importance = TRUE) 
-rand_ori2
-```
-First one is better than using selected variables.
-
 ```{r}
 library(caret)
 
@@ -363,3 +447,22 @@ y <- data_omitted$fire_count
 
 tuneRF(x, y)
 ```
+
+```{r}
+x2 <- data_lagged_omitted %>% dplyr::select(-fire_count)
+y2 <- data_lagged_omitted$fire_count
+
+tuneRF(x2, y2)
+```
+
+## writing the data to csv files
+```{r}
+# the lag data
+write.csv(data_lagged, here::here("VICfire/data/final_data_lag.csv"))
+
+# the non-lag data
+write.csv(data2, here::here("VICfire/data/final_data.csv"))
+```
+
+
+

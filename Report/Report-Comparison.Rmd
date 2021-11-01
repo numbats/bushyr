@@ -1,0 +1,275 @@
+---
+title: "Report-Comparison"
+author: "Helen Evangelina"
+date: "30/10/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, echo=FALSE, message = FALSE, warning= FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(dplyr)
+library(leaflet)
+library(readr)
+library(KernSmooth)
+library(shinyWidgets)
+library(plotly)
+library(sp)
+library(mapview)
+library(leafem)
+library(rgdal)
+library(maptools)
+library(raster)
+library(DT)
+library(htmlwidgets)
+library(lubridate)
+library(forcats)
+library(purrr)
+library(sf)
+```
+
+```{r, echo = FALSE}
+training <- read.csv(here::here("VICfire/data/training.csv"))
+  
+  training <- training %>%
+    filter(!CAUSE %in% c("BURNING BUILDING",
+                         "WASTE DISPOSAL, INDUSTRIAL, SAWMILL, TIP",
+                         "WASTE DISPOSAL, DOMESTIC",
+                         "BURNING VEHICLE, MACHINE",
+                         "BURNING BUILDING")) %>%
+    filter(new_cause != "other") %>%
+    filter(new_cause != "relight")
+  
+  
+  training <- dplyr::select(training, -c(EVENTID:FIRE_NUM), -id, -CAUSE, -FOREST, -FOR_CODE, -FOR_CAT)
+  
+  training <- mutate(training,
+                     year = factor(year(FIRE_START)),
+                     month = factor(month(FIRE_START), levels = c(10,11,12,1,2,3)),
+                     day = factor(day(FIRE_START), levels = c(1:31)),
+                     wod = factor(wday(FIRE_START), levels = c(1:7)))
+  
+  training <- filter(training, month %in% c(10,11,12,1,2,3))
+  
+  training <- na.omit(training)
+  
+  training <- mutate(training, new_cause = ifelse(new_cause == "accidental_human", "accident", new_cause)) %>%
+    mutate(new_cause = ifelse(new_cause == "burning_off_human", "burning_off", new_cause)) %>%
+    mutate(new_cause = factor(new_cause)) %>%
+    mutate(FOR_TYPE = factor(FOR_TYPE))
+  
+  training <- na.omit(training)
+  
+  training <- mutate(training,
+                     log_dist_cfa = log(dist_cfa),
+                     log_dist_camp = log(dist_camp),
+                     log_dist_road = log(dist_road),
+                     COVER = factor(COVER),
+                     HEIGHT = factor(HEIGHT))
+  
+  training <- rename(training, cause = new_cause)
+  training <- mutate(training,
+                     cause = fct_relevel(cause,
+                                         "lightning",
+                                         "accident",
+                                         "arson",
+                                         "burning_off"))
+  
+  training <- na.omit(training)
+  
+  training <- dplyr::select(training, -dist_road, -dist_cfa, -dist_camp, -FIRE_START)
+```
+
+```{r, echo = FALSE}
+training2016 <- training %>%
+  filter((year == 2016 & month %in% c(10,11,12)) | (year == 2017 & month %in% c(1,2,3)))
+
+training2017 <- training %>%
+  filter((year == 2017 & month %in% c(10,11,12)) | (year == 2018 & month %in% c(1,2,3)))
+```
+
+# Comparison of Hotspot and Historical Fire Data
+As previously stated, historical fire data might not represent the accurate locations of the bushfire ignitions. Fire might start in a remote location which might be hard to visually access or monitor. Therefore, to choose which fire data to use for our modelling, we do comparisons on the historical fire data and the satellite data. The satellite data used here is the clustered satellite data.
+```{r, echo = FALSE}
+# loading the clustered data
+hotspot2016_2018 <- read.csv(here::here("VICfire/data/clustering/predict_x_2016_2018.csv"))
+hotspot2019_2020 <- read.csv(here::here("VICfire/data/clustering/predict_x_2019_2020.csv"))
+
+hotspot2016_2018 <- hotspot2016_2018 %>%
+  mutate(year = year(time),
+         month = month(time))
+
+hotspot2019_2020 <- hotspot2019_2020 %>%
+  mutate(year = year(time),
+         month = month(time))
+
+hotspot2016 <- hotspot2016_2018 %>%
+  filter((year == 2016 & month %in% c(10,11,12)) | (year == 2017 & month %in% c(1,2,3)))
+
+hotspot2017 <- hotspot2016_2018 %>%
+  filter((year == 2017 & month %in% c(10,11,12)) | (year == 2018 & month %in% c(1,2,3)))
+
+hotspot2018 <- hotspot2016_2018 %>%
+  filter((year == 2018 & month %in% c(10,11,12)) | (year == 2019 & month %in% c(1,2,3)))
+
+hotspot2019 <- hotspot2019_2020 %>%
+  filter((year == 2019 & month %in% c(10,11,12)) | (year == 2020 & month %in% c(1,2,3)))
+
+hotspot2020 <- hotspot2019_2020 %>%
+  filter((year == 2020 & month %in% c(10,11,12)) | (year == 2021 & month %in% c(1,2,3)))
+```
+
+```{r, echo = FALSE}
+training2017_selected <- training2017 %>%
+  dplyr::select(lon, lat, year, month) %>%
+  mutate(type = "training")
+
+hotspot2017_2 <- hotspot2017 %>%
+  dplyr::select(-id, -time) %>%
+  mutate(type = "hotspot")
+
+# converting to factor
+hotspot2017_2$year <- as.factor(hotspot2017_2$year)
+hotspot2017_2$month <- as.factor(hotspot2017_2$month)
+
+joined_2017 <- training2017_selected %>%
+  bind_rows(hotspot2017_2)
+```
+
+```{r}
+training2016 <- training2016 %>%
+  mutate(period = "2016-2017")
+
+training2017 <- training2017 %>%
+  mutate(period = "2017-2018")
+
+hotspot2016 <- hotspot2016 %>%
+  mutate(period = "2016-2017")
+
+hotspot2017 <- hotspot2017 %>%
+  mutate(period = "2017-2018")
+
+training2016_2017 <- training2016 %>%
+  bind_rows(training2017) %>%
+  dplyr::select(lon, lat, year, month, period) %>%
+  mutate(type = "training")
+
+hotspot2016_2017 <- hotspot2016 %>%
+  bind_rows(hotspot2017) %>%
+  mutate(type = "hotspot")
+
+# converting to factor
+hotspot2016_2017$year <- as.factor(hotspot2016_2017$year)
+hotspot2016_2017$month <- as.factor(hotspot2016_2017$month)
+
+joined_all <- training2016_2017 %>%
+  bind_rows(hotspot2016_2017)
+```
+
+```{r}
+#comparing distribution
+joined_all %>%
+  count(month,year, type, period) %>%
+  group_by(type, year, period) %>%
+  ggplot(aes(x = month,
+             y = n)) +
+  geom_bar(aes(fill = type), position = "dodge", stat = "identity") +
+  ggtitle("Comparison of historical vs satellite data") +
+  facet_grid(~period) +
+  ylab("Number of fires")
+```
+
+The above plot illustrates the comparison of the number of fires from the satellite data and the historical fire data for the period 2016-2017 and 2017-2018. There are more hotspot data for the period of 2016-2017 in January, February and March, and more historical data for October, November, and December. Meanwhile for period 2017-2018, the historical dataset has more observations overall except for March. One obvious insight here is that the number of observations is not consistent monthly, indicating that month is an important factor in determining the risk of fire. The number of bushfires in November and December from the satellite data is significantly lower compared to the historical data, which might be due to the filtering of fire power to only include big fires. 
+
+```{r}
+# traaining data
+training2017_2 <- training2017
+coordinates(training2017_2) = c("lon", "lat")
+
+x1 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+x1[] <- 0
+
+tab1 <- table(cellFromXY(x1, training2017_2))
+
+x1[as.numeric(names(tab1))] <- tab1
+```
+
+
+
+```{r}
+# creating proportions
+df1 <- data.frame(coordinates(x1), count = x1[])
+df1 <- df1 %>% 
+  mutate(prop2017 = count/947)  %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# clustered hotspot data
+hotspot2017_2 <- hotspot2017
+coordinates(hotspot2017_2) <- c("lon", "lat")
+
+xh_2017 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xh_2017[] <- 0
+
+tabh_2017 <- table(cellFromXY(xh_2017, hotspot2017_2))
+
+xh_2017[as.numeric(names(tabh_2017))] <- tabh_2017
+```
+
+```{r}
+# creating proportions
+dfh_2017 <- data.frame(coordinates(xh_2017), count = xh_2017[])
+dfh_2017 <- dfh_2017 %>% 
+  mutate(prop_h2017 = count/488)  %>%
+  dplyr::select(-count)
+```
+
+We also look at the difference between the historical and satellite dataset per grid cell. The two maps below represent the number of fires in 2017-2018 period for historical (left) and satellite (right) data. We also compare the data for 2016-2017 and the insights we got are similar. There are a lot of fires in the historical data centered around CBD, indicating that there are more fires in areas where there are more people. Meanwhile, the satellite data shows that there are so little fires around the city center which might be due to the filtering of firepower. There are a lot of fires in remote areas which are not captured by the historical data, which might be due to these remote fires not being able to be monitored by people directly.  Satellite data, on the other hand, can capture these fires well. 
+
+```{r}
+# with clustering
+plot(x1)
+points(training2017, pch = 20)
+```
+```{r}
+plot(xh_2017)
+points(hotspot2017_2, pch = 20)
+```
+
+To account for the different number of fires each year, we created proportions of fire for each grid cell, which is calculated by dividing the number of fires in that cell for that year divided by the total fires in the year. The result is that there are some differences in the proportions for some cells as seen from the plot below. Some cells have higher proportions for the hotspot data while some others have higher proportions for historical data. Cells with higher proportions for historical data tend to be those areas closer to the city center in where there are a lot of people. On the other hand, cells with higher hotspot proportions are those areas which are more remote. 
+
+```{r}
+#creating scatter plot
+df_joined_2017 <- df1 %>%
+  left_join(dfh_2017, by = c("x", "y")) %>%
+  mutate(diff = prop2017 - prop_h2017,
+         id = 1:264) 
+
+df_joined_2017 %>%
+  group_by(x, y) %>%
+  ggplot(aes(x = prop2017,
+             y = prop_h2017,
+             label = id)) +
+  geom_text() +
+  ggtitle("Proportions of hotspot vs historical data for 2017-2018")  +
+  ylab("Proportions of hotspot data") +
+  xlab("Proportions of historical data")
+```
+
+In conclusion, satellite or hotspot data provides a more accurate locations and time of bushfire ignitions as satellite data captures those fires in remote areas not visually accessible by people. There was a big fire in Terang on St Patrick’s Day, 17 March 2018. It destroyed residential properties and damaged farming properties. However, this fire was not recorded in the historical data. For these reasons, we decided to use satellite data for our fire risk modelling. 
+
+
