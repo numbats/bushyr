@@ -18,13 +18,32 @@ library(patchwork)
 library(tmap)
 library(knitr)
 library(kableExtra)
+library(tidymodels)
 ```
 
 # Introduction
 
-```{r load-data}
+```{r load-data, eval=FALSE}
+# --- load ALL variables from ida.Rmd & eda.Rmd
 load(here::here("data/eda.Rdata"))
 load(here::here("data/ida.Rdata"))
+```
+
+```{r, eval=FALSE}
+# --- save `eda.Rmd` variables
+save(cluster_16_21_sf, ignition_raster_values_cluster_bf_season, ignition_rasterize_cluster_bf_season, vic_map_sf, vic_raster_crop_values_join, cause_join_count_bf_season, cluster_16_21_count_bf_season, cluster_16_21_count_month, cause_join_count_month, ignition_rasterize_training_sf_bf_season,
+     file = "data/eda_report.Rdata")
+
+# --- save `ida.Rmd` variables
+save(max_temp_raster_crop, lasso_grid, final_lasso, train, test, lowest_rmse,
+     file = "data/ida_report.Rdata")
+```
+
+
+```{r}
+# --- load relevant variables 
+load(here::here("data/eda_report.Rdata"))
+load(here::here("data/ida_report.Rdata"))
 ```
 
 
@@ -276,8 +295,77 @@ The results is shown in the plot above. There is obvious differences in how the 
 There are a few hypothesis pertaining to the inaccuracies of the historical data. Firstly, it is difficult to distinguish the number of fires one observes with the naked eye. For the same reason, it is less accurate and more subjective to gauge the location of a fire. Recording bushfires in this manner also prevents remote areas from being surveyed. Equally important is that we might also need to check the consistency of fire tower manning at each station. Another thing to note is that the number of bushfires is significantly lower from October to November, this could be due to filtering the clustered satellite data to include only bigger fires. 
 
 
+# Investigating the relationship between fire ignitions and weather and climate variables
 
+## variable selection with lasso regression
 
+A lasso regresion was implemented to parse out the important variables. Depending on the penalty ($\lambda$) term imposed on the least square optimisation problem has the effect of shrinking (unimportnat) variables to zero/very small coefficient. When $\lambda = 0$, no parameters are elimated and the estimate equal to the one found in least squares. When $\lambda$ increases, more and more coefficients are set to 0 and eliminated. When $\lambda = \infty$, all coefficients are eliminated.
+
+To choose a suitable $\lambda$ value, 5-fold cross validation is applied. Using a $\lambda$ grid consisting of 50 levels from 0 to 10 which is the default for `tune::penalty()`. For each cross-validation fold, the regularised lasso regression model is fitted and $R^2$ and $RMSE$ was recorded. The results is shown in Figure \@ref(fig:lasso-metric) *note results are on log10 scale. The $lambda$ value that minimises the RMSE was chosen which is found to be $1.0001$. 
+
+```{r lasso-metric, fig.cap="mean RMSE(top) and R^2 (bottom) against penalty term"}
+lasso_grid %>% 
+  # obtain tuning results; across performance metrics (`.estimator`)
+  tune::collect_metrics() %>% 
+  # plot
+  ggplot(aes(x = penalty,
+             y = mean,
+             colour = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err)) +
+  geom_line(size = 1.5) +
+  # facet by `.metric`
+  facet_wrap(~ .metric,
+             scales = "free",
+             nrow = 2) +
+  # penalty in log10 scale
+  scale_x_log10() +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+To sum up, we extracted and plotted (in Figure \@ref(fig:vi)) the variable important scores for the predictors in the model. That is, the variables that coeffients remained consistently relatively higher despite the regularisation effect. Their effects (positive/negative) are coloured respectively. Correspondingly, the feature weights as $\lambda$ increases is shown in \@ref(fig:coefs-lasso)
+
+```{r vi, fig.cap="variable importance plot from lasso regression"}
+# --- plot variable importance
+final_lasso %>% 
+  parsnip::fit(train) %>% 
+  # extract model fit
+  workflows::extract_fit_parsnip() %>% 
+  # compute variable importance scores for predictors
+  vip::vi(lambda = lowest_rmse$penalty) %>% 
+  # absolute `Importance`; for plotting
+  mutate(Importance = abs(Importance)) %>% 
+  # plot 
+  ggplot(aes(x = Importance,
+             y = fct_reorder(Variable,
+                             Importance),
+             fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(y = NULL) +
+  theme_bw() +
+  colorspace::scale_fill_discrete_qualitative()
+```
+
+```{r coefs-lasso}
+lasso_grid_coefs <- lasso_grid %>% 
+  select(id, .extracts) %>% 
+  unnest(.extracts) %>% 
+  unnest(.extracts)
+
+p <- lasso_grid_coefs %>% 
+  ggplot() + 
+  geom_line(aes(x = lambda, 
+                y = estimate, 
+                group = term,
+                colour = term)) +
+  scale_x_log10() +
+  labs(title = "effect on lambda on feature coefficients") +
+  theme_bw()  
+
+plotly::ggplotly(p)
+```
 
 
 # Conclusion 
