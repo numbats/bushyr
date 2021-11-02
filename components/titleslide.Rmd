@@ -36,7 +36,7 @@ count: false
 *`r rmarkdown::metadata$author`* 
 
 
-`r anicon::faa("link", animate="float")`  [https://bit.ly/VicFireIgnitionRisk](https://bit.ly/VicFireIgnitionRisk)
+`r anicon::faa("link", animate="float")`  [https://numbats/bushyr](https://numbats/bushyr)
 
 `r rmarkdown::metadata$date`
 
