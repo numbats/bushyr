@@ -441,44 +441,167 @@ final_data <- data_lagged_omitted %>%
 no_of_id <- unique(data_lagged_omitted$id)
 
 # making predictions
+# without log scale
+set.seed(2021)
 pred_values <- vector()
 for (i in 1:length(no_of_id)) {
   data <- final_data %>% filter(id == no_of_id[i])
-  rfmodel <-  randomForest(log(fire_count+1) ~ .-id, data = data, importance = TRUE, mtry = 6, ntree = 500) 
+  rfmodel <-  randomForest(fire_count ~ .-id, data = data, importance = TRUE, mtry = 6, ntree = 500) 
   predicted_values <- rfmodel$predicted 
   for (j in 1:length(predicted_values)) {
   pred_values <- append(pred_values, predicted_values[j])
   }
 }
-pred_count <- as.data.frame(exp(pred_values)-1) %>%
-  rename(`pred_count` = `exp(pred_values)-1`)
+pred_count <- as.data.frame(pred_values) 
 final_data <- final_data %>%
-  bind_cols(pred_count) %>%
-  dplyr::select(fire_count, pred_count)
+  bind_cols(pred_count)
          
+comparison <- final_data %>% 
+  dplyr::select(id, month, pred_values, fire_count)
 
-min(pred_count)
-max(pred_count)
-pred_count
-arrange(pred_count, -`exp(pred_values)-1`)
+# calculating MSE
+mean((comparison$fire_count - comparison$pred_values)^2)
 
-tibble(pred_count = exp(pred_values) - 1) %>%
-  arrange(-pred_count) %>% View()
-View(final_data)
-
+# creating scatter plot
+ggplot(comparison, aes(x = fire_count,
+                       y = pred_values)) +
+  geom_point()
 ```
+MSE of 2.4703
 
-Model each month? 
+## RF with log scale
+```{r}
+final_data2 <- data_lagged_omitted %>% 
+  dplyr::select(-year)
 
+# making predictions
+# with log scale
+set.seed(2021)
+pred_values2 <- vector()
+for (i in 1:length(no_of_id)) {
+  data2 <- final_data2 %>% filter(id == no_of_id[i])
+  rfmodel2 <-  randomForest(log(fire_count+1) ~ .-id, data = data2, importance = TRUE, mtry = 6, ntree = 500) 
+  predicted_values2 <- rfmodel2$predicted 
+  for (j in 1:length(predicted_values)) {
+  pred_values2 <- append(pred_values2, predicted_values2[j])
+  }
+}
+pred_count2 <- tibble(pred_values = (exp(pred_values2)-1)) 
+final_data2 <- final_data2 %>%
+  bind_cols(pred_count2)
+         
+comparison2 <- final_data2 %>% 
+  dplyr::select(id, month, pred_values, fire_count)
+
+# calculating MSE
+mean((comparison2$fire_count - comparison2$pred_values)^2)
+
+# creating scatter plot
+ggplot(comparison2, aes(x = fire_count,
+                       y = pred_values)) +
+  geom_point()
+```
+MSE = 2.51
 
 ```{r}
-rfmodel_id <- rfmodel[[1]]
-  data_id <- final_data %>% filter(id == no_of_id[1])
-  predicted_values <- as.data.frame(rfmodel_id$predicted) %>%
-    rename(`pred` = `rfmodel_id$predicted`)
-rfmodel_id$predicted
-data_id
-rfmodel_id
+dataframe <- data.frame(id = 1:400) 
+
+pred_oct_final <- final_data %>% 
+  dplyr::filter(month == 10) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_oct_final <- dataframe %>%
+  left_join(pred_oct_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0)) 
+
+data_oct_final <- data_oct_final %>% left_join(lonlat)
+
+pred_nov_final <-final_data %>% 
+  dplyr::filter(month == 11) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_nov_final <- dataframe %>%
+  left_join(pred_nov_final) %>%
+  dplyr::select(id,pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_nov_final <- data_nov_final %>% left_join(lonlat)
+
+pred_dec_final <- final_data %>% 
+  dplyr::filter(month == 12) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_dec_final <- dataframe %>%
+  left_join(pred_dec_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_dec_final <- data_dec_final %>% left_join(lonlat)
+
+pred_jan_final <- final_data %>% 
+  dplyr::filter(month == 1) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_jan_final <- dataframe %>%
+  left_join(pred_jan_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_jan_final <- data_jan_final %>% left_join(lonlat)
+
+pred_feb_final <- final_data %>% 
+  dplyr::filter(month == 2) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_feb_final <- dataframe %>%
+  left_join(pred_feb_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_feb_final <- data_feb_final %>% left_join(lonlat)
+
+pred_mar_final <- final_data %>% 
+  dplyr::filter(month == 3) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_mar_final <- dataframe %>%
+  left_join(pred_mar_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_mar_final <- data_mar_final %>% left_join(lonlat) %>%
+  dplyr::select(-id)
+```
+
+```{r}
+library(rnaturalearth)
+library(sf)
+au_map <- ne_states(country = 'Australia', returnclass = 'sf')
+vic_map <- au_map[7,]
+
+vic_map_sf <- vic_map %>%
+  st_as_sf(coords = c("lon", "lat"))
+
+coordinates(data_mar_final) = c("x", "y")
+mar_raster <- rasterFromXYZ(data_mar_final)
+library(tmap)
+tm_shape(mar_raster$data$pred_risk) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+```{r}
+mar_raster$pred_risk
 ```
 
 
