@@ -31,7 +31,7 @@ load(here::here("data/ida.Rdata"))
 
 ```{r, eval=FALSE}
 # --- save `eda.Rmd` variables
-save(cluster_16_21_sf, ignition_raster_values_cluster_bf_season, ignition_rasterize_cluster_bf_season, vic_map_sf, vic_raster_crop_values_join, cause_join_count_bf_season, cluster_16_21_count_bf_season, cluster_16_21_count_month, cause_join_count_month, ignition_rasterize_training_sf_bf_season,
+save(cluster_16_21_sf, ignition_raster_values_cluster_bf_season, ignition_rasterize_cluster_bf_season, vic_map_sf, vic_raster_crop_values_join, cause_join_count_bf_season, cluster_16_21_count_bf_season, cluster_16_21_count_month, cause_join_count_month, ignition_rasterize_training_sf_bf_season, ignition_rasterize_cluster_bf_season,
      file = "data/eda_report.Rdata")
 
 # --- save `ida.Rmd` variables
@@ -45,7 +45,6 @@ save(max_temp_raster_crop, lasso_grid, final_lasso, train, test, lowest_rmse,
 load(here::here("data/eda_report.Rdata"))
 load(here::here("data/ida_report.Rdata"))
 ```
-
 
 Bushfires is a common and natural phenomenon that occurs frequently in many places around the world. Victoria however, is one of the most fire-prone region in the world, given its fire conducive weather and fuel conditions. Fire ignitions are most commonly caused naturally by lightning or can also be man-made such as through planned burning off, accidents or arson. 
 
@@ -184,6 +183,49 @@ max_temp_raster_crop %>%
 
 
 # EDA
+
+## Satellite data
+```{r}
+cluster_map_facet_bf_season <- ignition_rasterize_cluster_bf_season %>% 
+  # when 0; set to NA (for grey cell)
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count)) %>% 
+  tmap::tm_shape(.,
+                 name = "grid cell fire count") +
+  tmap::tm_polygons(col = "fire_count",
+                    id = "id",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
+                    palette = "YlOrRd",
+                    alpha = 0.4,
+                    colourNA = "grey",
+                    legend.show = F) + 
+  
+  tmap::tm_facets(by = "bf_season") + 
+  
+  # --- add ignition points 
+  tmap::tm_shape(cluster_16_21_sf,
+                 name = "ignition points") +
+  tmap::tm_bubbles(# col = "cause",
+                   size = 0.3,
+                   alpha = 0.1,
+                   id = "") +
+  tmap::tm_facets(by = "bf_season") +
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- themes
+  tmap::tm_layout(legend.show = F) +
+  
+  tmap::tm_basemap(leaflet::providers$OpenStreetMap)
+
+cluster_map_facet_bf_season
+```
+
 
 ## Discrepancy between Satellite and First Responder's data
 

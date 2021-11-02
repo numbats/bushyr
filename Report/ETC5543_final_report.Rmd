@@ -1,0 +1,577 @@
+---
+title: "ETC5543_final_report"
+author: "Brenwin"
+date: "02/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# --- load libraries
+library(tidyverse)
+```
+
+```{r}
+# --- load relevant variables 
+load(here::here("data/eda_report.Rdata"))
+load(here::here("data/ida_report.Rdata"))
+```
+
+
+
+# Introduction and Motivation
+    
+    H
+Bushfire is an intrinsic part of Australia’s environment (https://www.ga.gov.au/scientific-topics/community-safety/bushfire) and it has been a massive issue in Australia as it has caused significant damages in property, life as well as the nature. There have been some catastrophic bushfire events in the past including Black Saturday 2009 in Victoria, Ash Wednesday 1983 in Victoria and South Australia, the 2006 December bushfires, as well as the recent 2019-2020 bushfires. Canada, USA, Turkey, Greece, Italy and Russia faced a devastating bushfire season in the summer of 2021 since it was the hottest July ever recorded, raising concern for Australia since it is moving into summer. Especially since the 2019-2020 bushfire in Australia resulted to more damages on property and the environment compared to other bushfire events in history, with 3094 houses destroyed and over 17M hectares of land burned (Lisa Richards, Nigel Brew and Smith, 2020). 
+
+Even though bushfires cannot be avoided naturally, their consequences can be minimised. Thus, it is important to predict the risk of bushfire as understanding the risk of fire of certain areas would help in developing strategies for mitigating the risks. A prediction model can tell us whether an area has a high risk of bushfire, and we can focus on areas with high fire risk. We will use certain modeling methods to come up with the most suitable model for predicting the bushfire risk. 
+
+This work will focus on Victoria. It is based on Weihao Li’s thesis titled “Using Remote Sensing Data to Understand Fire Ignitions in Victoria during the 2019-2020 Australian Bushfire Season” (citation). Weather is considered a determinant for forest fires (Brown et al. 2008). Therefore, we will be using environmental variables such as temperature, relative humidity, wind speed, radiation, drought index, etc in our modelling as the predictors. We will be testing if these variables are significant for predicting the risk of bushfire in Victoria. 
+
+Fire risk is defined as the likelihood of a fire occurring, multiplied by the severity of the fire (https://www.merton.gov.uk/assets/Documents/www2/fire_safety_risk_assessment_-_june_2013.pdf). However, in this case, we will be defining fire risk as only the likelihood of fire occurring. 
+The overall objectives of this work are to develop a web app by using shiny to monitor potential fire ignitions by developing fire risk models for the 2021-2022 Victorian bushfire season based on environmental variables in where users would be able to input the values of the environmental variables which would change the risk predictions. 
+
+    B
+Bushfires is a common and natural phenomenon that occurs frequently in many places around the world. Victoria however, is one of the most fire-prone region in the world, given its fire conducive weather and fuel conditions. Fire ignitions are most commonly caused naturally by lightning or can also be man-made such as through planned burning off, accidents or arson.
+
+This report condenses the research work on bushffire risk modelling done by Brenwin Ang and Helen Evangelina as part of their internship for ETC5543 Business Analytics Creative Acitivity coursework. An extension to the work done by Di Cook, Emily Dodwell and Patrick Li on hotspot clustering algorithm. The overall goal to develop a Shiny web application and process to predict bushfire risk across Victoria, Australia. The github repository including Patrick’s thesis can be found here.
+
+The resulting app seeks to improve accessibility to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change.
+
+
+# EDA
+
+## Map of Victoria
+```{r vic_grid, fig.cap="Victoria bounding box gridded 20 by 20"}
+# --- make tmaps interactive
+tmap::tmap_mode("view")
+
+# --- plot Victoria map; in 20x20 grid cells
+as(vic_raster_crop_values_join$id, "SpatialPolygonsDataFrame") %>% # random raster; with Victoria bbox
+  sf::st_as_sf() %>% 
+  tmap::tm_shape() +
+  tmap::tm_polygons(alpha = 0.3,
+                    id = "id") +
+  # --- draw outline of Victoria
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) + # line width
+  tmap::tm_layout(main.title = "Map of Victoria in 20x20 grid cells") +
+  tmap::tm_basemap(leaflet::providers$OpenStreetMap)
+```
+
+The following data analysis is based on the map of Victoria that is divided into 20x20 cells (shown above). Note that only cells within Victoria were considered. Our study also only focuses on bushfire seasons where most fire ignitions happen which is from October through to March and data from 2016 to 2021. 
+
+
+
+# Data Sources 
+The data used for this project is the satellite hotspots data, which is collated with environmental variables data from SILO, ERA5, BoM, DELWP, and roads data (?).
+
+## Fire ignitions data
+
+### First respondent fire data (historical fire data) & Satellite data
+
+    H
+We use the historical bushfire ignition locations and causes from the Victorian Department of Environment, Land, Water and Planning (DELWP) Fire Origins and compare it with the hotspot data from Himawari-8 to see which data is more accurate to be used in our modelling. This dataset provides the locations and causes of historical bushfire ignitions reported by the first respondent. These locations are recorded by crews rather than the exact origin of fire.
+
+Hotspot data from Himawari-8 satellite (P-Tree System, 2020) provides a high temporal and spatial resolution. This data can be taken from the Japan Aerospace Exploration Agency FTP site. Himawari-8 data is a remote sensing data which are collected by remote sensors carried by a satellite. The reason we compare the Himawari-8 satellite data with the historical bushfire data is that there are some bushfires start in very remote areas which are virtually impossible to access. Remote sensing data provides a possible solution for this, and it may provide a more accurate locations of bushfire ignitions. Himawari-8 data has a 10-minute time resolution.
+
+    B
+Fire ignitions are represented as spatial points on the map. There were two sources of bushfire ignitions data.
+
+Firstly, hotspot satellite data from Himawari-8 satellite. Fire ignitions were detected using a clustering algorithm able to detect fires in real-time. (more information available in Patrick’s github). Secondly, historical First Responder’s data, this can be thought of as fires reported upon sight. That is, the First Respondent’s data was based on where the first responder saw the fire. Most of these were reports from volunteers manning fire towers erected around Victoria. (see appendix for map of fire towers around Victoria). Below shows fire ignitions data overlayed onto griided map of Victoria. 
+
+
+```{r ignition-pts, fig.cap="fire ignitions represented as points on Victoria map"}
+# from eda's `cluster_map_facet_bf_season`
+cluster_map_bf_season <- ignition_rasterize_cluster_bf_season %>% 
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count)) %>% 
+  filter(bf_season == "2019-2020") %>% 
+  tmap::tm_shape(name = "cell fire ignition count") +
+  tmap::tm_polygons(col = "fire_count",
+                    id = "id",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
+                    palette = "YlOrRd",
+                    alpha = 0.4,
+                    colourNA = "grey",
+                    legend.show = F) + 
+  
+  # --- add ignition points (to buffer as necessary)
+  tmap::tm_shape(cluster_16_21_sf %>% filter(bf_season == "2019-2020"),
+                 name = "fire ignition points") +
+  tmap::tm_bubbles(# col = "cause",
+                   size = 0.3,
+                   alpha = 0.1,
+                   id = "") +
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- themes
+  tmap::tm_layout(legend.show = F) +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "number of bushfire ignitions across Victoria")
+
+cluster_map_bf_season
+```
+
+## Climate and landscape data
+
+    H
+**ERA5 weather data**
+
+**Fuel layer**
+The fuel layer data is obtained from the 2018 nationwide forest dataset from Australian Bureau of Agricultural and Resource Economics and Services (2018). This data consists of a continental spatial dataset of forest extent by national forest categories and types. A forest variable is used as a predictor in our model in where 0 indicates that the grid cell is not a forest and 1 if otherwise.
+
+    B
+```{r var-tab}
+tibble::tribble(~source, ~variables, ~format, ~temporal_resolution,
+                "SILO (https://www.longpaddock.qld.gov.au/silo/)", "max_temp, rh, radiation, et_short_crop, daily_rain", "NetCDF", "daily",
+                
+                "ERA5 Reanalysis data (https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels-monthly-means?tab=overview)", "lai_hv, lai_lv, WS10", "NetCDF" ,"monthly",
+                
+                "BoM's AWRA-L (http://www.bom.gov.au/water/landscape/#/sm/Actual/month/-26.32/132.54/3/Point/Separate/-15.6/130.25/2021/4/30/)", "s0_pct", "NetCDF", "monthly",
+                
+                "Department of Environment, Land, Water and Planning (DELWP) (https://discover.data.vic.gov.au/dataset/forest-types-of-victoria)", "vic_forest", "ShapeFile", "Periodic") %>% 
+  knitr::kable(caption = "data source, variables, format and temporal resolution used in this study") %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+
+In this analysis, 11 variables are considered to identify their influence on bushfires. These variables are: maximum temperature (`max_temp`), relative humidity (`rh`), solar radiation (`radiation`), derived FAO56 short crop evapotranspiration rate in mm (`et_short_crop`), daily rainfall (`daily_rain`), leaf area index in high vegetation in $m^2 \ m^{-2}$ (`lai_hv`), leaf area index in low vegetation in $m^2 \ m^{-2}$  (`lai_lv`), 10m wind speed in $m\ s^{-1}$ (`WS10`) and  forest type in Victoria (`vic_forest`). All the variables were converted into monthly data by taking its mean. 
+
+All the spatial data are converted into gridded form (`raster`) to match the 20x20 gridded Victoria map in Figure \@ref(fig:vic_grid). To achieve this for numeric variables (all except `vic_forest`), since the resolution provided from the data sources were much finer than required, all the finer cells contained in the larger grid cell are averaged. For `vic_forest`, any cells that contains a forest is set to 1, 0 otherwise. An example for a the variable `max_temp` is shown in Figure \@ref(fig:max-temp). 
+
+
+```{r max-temp, fig.cap="Average max temperature for the month of May 2021"}
+max_temp_raster_crop %>% 
+  raster::reclassify(rcl = cbind(NA, 0)) %>% # reclassify NA values to 0
+  # raster -> spdf -> sf
+  as(., "SpatialPolygonsDataFrame") %>% 
+  sf::st_as_sf() %>%
+  dplyr::select(X2021.05.01:X2021.05.31) %>% 
+  # pivot_longer; change to tibble; since `pivot_longer` not compatible with `sf` yet
+  as_tibble() %>% 
+  mutate(id = 1:400,
+         .before = "X2021.05.01") %>% 
+  tidyr::pivot_longer(cols = X2021.05.01:X2021.05.31,
+                      names_to = "date",
+                      values_to = "max_temp") %>% 
+  # to `sf`
+  sf::st_as_sf() %>% 
+  group_by(id) %>% 
+  summarise(mean_max_temp = mean(max_temp)) %>% 
+  tmap::tm_shape(.,
+                 name = "max_temp cell") +
+  tm_polygons(col = "mean_max_temp",
+              alpha = 0.5) +
+  
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # line width
+  
+  tm_layout(main.title = "Map of Victoria in 20x20 grid cells") +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "Mean Max Temperature Across Victoria for May 2021")
+```
+
+
+## Data Processing
+### Himawari-8 hotspot data
+The hotspot data from Himawari-8 firstly needs to be selected to those within the boundary of Victoria. To reduce noise, it is then filtered based on the fire power with a recommended threshold of over 100 (irradiance over 100 watts per square metre) (Williamson, 2020). 
+
+The hotspot data from Himawari-8 needs to be grouped into clusters because some hotspots are branches of an existing bushfire. Therefore, we use spatio-temporal clustering to group the hotspots into clusters. Clustering algorithm used in this project is based on Weihao Li’s thesis (citation & reference), inspired by two existing clustering algorithm, Density Based Spatial Clustering of Applications with Noise (DBSCAN) (Ester et al., 1996) and Fire Spread Reconstruction (FSR) (Loboda and Csiszar, 2007). 
+
+The issue with using DBSCAN for clustering hotspot data is its algorithm assumes the clustering rules work in both directions of a timeline, which does not capture the reality that bushfires evolve over time in one direction. It is not suitable for temporal data. FSR reconstructs bushfire spread well, however it is constructing the clusters sequentially. This means that FSR will consider two fires to be a single fire if they commence at different locations but they overlap. Because of this, FSR does not reflect the real speed of bushfire correctly. Other limitation of FSR is that it lacks detailed consideration of parameter tuning. Weihao Li’s clustering algorithm is inspired by these two algorithms, and it can efficiently and robustly cluster hotspot to consider the temporal behavior of bushfires.
+
+There are four steps in the clustering algorithm. The first step is to slice the temporal dimension based on a parameter named ActiveTime. Next, the hotspots are clustered spatially by using a parameter called AjdDist, which reflects the potential distance a fire can spread with respect to the temporal resolution of the data. Hotspots in the same component will be assigned a unique membership id. The third step is to broadcast the clustering results and update the membership label. Lastly, the ignition locations are computed with the earliest observed hotspot indicates the ignition point. If there are several earliest hotspots, the centroid of these points is used. 
+
+The clustering algorithm slices the data by its temporal dimension and splits the spatio-temporal clustering tasks into thousands spatial clustering tasks. The result of the clustering is a dataset consisting of four variables – unique identifier, longitude, latitude, and time. The final hotspot data used for this project consists of 2,917 observations from 2016 to 2021. 
+
+
+## Data integration
+– Talks about lagged variables bcs this might be important. The risk of fire happening might be affected by the average weather conditions for the two months or even a year. A hotter and drier year might result to more fires than –
+
+# Comparison of Hotspot and Historical Fire Data
+
+    H
+As previously stated, historical fire data might not represent the accurate locations of the bushfire ignitions. Fire might start in a remote location which might be hard to visually access or monitor. Therefore, to choose which fire data to use for our modelling, we do comparisons on the historical fire data and the satellite data. The satellite data used here is the clustered satellite data.
+```{r, echo = FALSE}
+# loading the clustered data
+hotspot2016_2018 <- read.csv(here::here("VICfire/data/clustering/predict_x_2016_2018.csv"))
+hotspot2019_2020 <- read.csv(here::here("VICfire/data/clustering/predict_x_2019_2020.csv"))
+
+hotspot2016_2018 <- hotspot2016_2018 %>%
+  mutate(year = year(time),
+         month = month(time))
+
+hotspot2019_2020 <- hotspot2019_2020 %>%
+  mutate(year = year(time),
+         month = month(time))
+
+hotspot2016 <- hotspot2016_2018 %>%
+  filter((year == 2016 & month %in% c(10,11,12)) | (year == 2017 & month %in% c(1,2,3)))
+
+hotspot2017 <- hotspot2016_2018 %>%
+  filter((year == 2017 & month %in% c(10,11,12)) | (year == 2018 & month %in% c(1,2,3)))
+
+hotspot2018 <- hotspot2016_2018 %>%
+  filter((year == 2018 & month %in% c(10,11,12)) | (year == 2019 & month %in% c(1,2,3)))
+
+hotspot2019 <- hotspot2019_2020 %>%
+  filter((year == 2019 & month %in% c(10,11,12)) | (year == 2020 & month %in% c(1,2,3)))
+
+hotspot2020 <- hotspot2019_2020 %>%
+  filter((year == 2020 & month %in% c(10,11,12)) | (year == 2021 & month %in% c(1,2,3)))
+```
+
+```{r, echo = FALSE}
+training2017_selected <- training2017 %>%
+  dplyr::select(lon, lat, year, month) %>%
+  mutate(type = "training")
+
+hotspot2017_2 <- hotspot2017 %>%
+  dplyr::select(-id, -time) %>%
+  mutate(type = "hotspot")
+
+# converting to factor
+hotspot2017_2$year <- as.factor(hotspot2017_2$year)
+hotspot2017_2$month <- as.factor(hotspot2017_2$month)
+
+joined_2017 <- training2017_selected %>%
+  bind_rows(hotspot2017_2)
+```
+
+```{r}
+training2016 <- training2016 %>%
+  mutate(period = "2016-2017")
+
+training2017 <- training2017 %>%
+  mutate(period = "2017-2018")
+
+hotspot2016 <- hotspot2016 %>%
+  mutate(period = "2016-2017")
+
+hotspot2017 <- hotspot2017 %>%
+  mutate(period = "2017-2018")
+
+training2016_2017 <- training2016 %>%
+  bind_rows(training2017) %>%
+  dplyr::select(lon, lat, year, month, period) %>%
+  mutate(type = "training")
+
+hotspot2016_2017 <- hotspot2016 %>%
+  bind_rows(hotspot2017) %>%
+  mutate(type = "hotspot")
+
+# converting to factor
+hotspot2016_2017$year <- as.factor(hotspot2016_2017$year)
+hotspot2016_2017$month <- as.factor(hotspot2016_2017$month)
+
+joined_all <- training2016_2017 %>%
+  bind_rows(hotspot2016_2017)
+```
+
+```{r}
+#comparing distribution
+joined_all %>%
+  count(month,year, type, period) %>%
+  group_by(type, year, period) %>%
+  ggplot(aes(x = month,
+             y = n)) +
+  geom_bar(aes(fill = type), position = "dodge", stat = "identity") +
+  ggtitle("Comparison of historical vs satellite data") +
+  facet_grid(~period) +
+  ylab("Number of fires")
+```
+
+The above plot illustrates the comparison of the number of fires from the satellite data and the historical fire data for the period 2016-2017 and 2017-2018. There are more hotspot data for the period of 2016-2017 in January, February and March, and more historical data for October, November, and December. Meanwhile for period 2017-2018, the historical dataset has more observations overall except for March. One obvious insight here is that the number of observations is not consistent monthly, indicating that month is an important factor in determining the risk of fire. The number of bushfires in November and December from the satellite data is significantly lower compared to the historical data, which might be due to the filtering of fire power to only include big fires. 
+
+```{r}
+# traaining data
+training2017_2 <- training2017
+coordinates(training2017_2) = c("lon", "lat")
+
+x1 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+x1[] <- 0
+
+tab1 <- table(cellFromXY(x1, training2017_2))
+
+x1[as.numeric(names(tab1))] <- tab1
+```
+
+
+
+```{r}
+# creating proportions
+df1 <- data.frame(coordinates(x1), count = x1[])
+df1 <- df1 %>% 
+  mutate(prop2017 = count/947)  %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# clustered hotspot data
+hotspot2017_2 <- hotspot2017
+coordinates(hotspot2017_2) <- c("lon", "lat")
+
+xh_2017 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xh_2017[] <- 0
+
+tabh_2017 <- table(cellFromXY(xh_2017, hotspot2017_2))
+
+xh_2017[as.numeric(names(tabh_2017))] <- tabh_2017
+```
+
+```{r}
+# creating proportions
+dfh_2017 <- data.frame(coordinates(xh_2017), count = xh_2017[])
+dfh_2017 <- dfh_2017 %>% 
+  mutate(prop_h2017 = count/488)  %>%
+  dplyr::select(-count)
+```
+
+We also look at the difference between the historical and satellite dataset per grid cell. The two maps below represent the number of fires in 2017-2018 period for historical (left) and satellite (right) data. We also compare the data for 2016-2017 and the insights we got are similar. There are a lot of fires in the historical data centered around CBD, indicating that there are more fires in areas where there are more people. Meanwhile, the satellite data shows that there are so little fires around the city center which might be due to the filtering of firepower. There are a lot of fires in remote areas which are not captured by the historical data, which might be due to these remote fires not being able to be monitored by people directly.  Satellite data, on the other hand, can capture these fires well. 
+
+```{r}
+# with clustering
+plot(x1)
+points(training2017, pch = 20)
+```
+```{r}
+plot(xh_2017)
+points(hotspot2017_2, pch = 20)
+```
+
+To account for the different number of fires each year, we created proportions of fire for each grid cell, which is calculated by dividing the number of fires in that cell for that year divided by the total fires in the year. The result is that there are some differences in the proportions for some cells as seen from the plot below. Some cells have higher proportions for the hotspot data while some others have higher proportions for historical data. Cells with higher proportions for historical data tend to be those areas closer to the city center in where there are a lot of people. On the other hand, cells with higher hotspot proportions are those areas which are more remote. 
+
+```{r}
+#creating scatter plot
+df_joined_2017 <- df1 %>%
+  left_join(dfh_2017, by = c("x", "y")) %>%
+  mutate(diff = prop2017 - prop_h2017,
+         id = 1:264) 
+
+df_joined_2017 %>%
+  group_by(x, y) %>%
+  ggplot(aes(x = prop2017,
+             y = prop_h2017,
+             label = id)) +
+  geom_text() +
+  ggtitle("Proportions of hotspot vs historical data for 2017-2018")  +
+  ylab("Proportions of hotspot data") +
+  xlab("Proportions of historical data")
+```
+
+In conclusion, satellite or hotspot data provides a more accurate locations and time of bushfire ignitions as satellite data captures those fires in remote areas not visually accessible by people. There was a big fire in Terang on St Patrick’s Day, 17 March 2018. It destroyed residential properties and damaged farming properties. However, this fire was not recorded in the historical data. For these reasons, we decided to use satellite data for our fire risk modelling. 
+
+
+      B
+```{r fire-bf-month, fig.cap="number of fire ignitions against bushfire seasons(top) and month(bottom)"}
+# --- fire ignitions by bushfire season
+p1 <- cause_join_count_bf_season %>% 
+  filter(bf_season %in% unique(cluster_16_21_count_bf_season$bf_season)) %>% 
+  dplyr::select(bf_season, total) %>% 
+  # join cluster & join data counts
+  right_join(cluster_16_21_count_bf_season,
+            by = "bf_season") %>% 
+  rename(total_join = total.x,
+         total_cluster = total.y) %>% # fire ignitions; in clustering data (2016-2021)
+  distinct(bf_season,
+           .keep_all = T) %>% 
+  dplyr::select(-data) %>% 
+  pivot_longer(cols = total_join:total_cluster,
+               names_to = "data", # in join (historical(2000-2019) & sat(2019-2020))// cluster(2016-2021)
+               values_to = "n") %>% # no. of fire ignitions
+  ggplot() +
+  geom_col(aes(x = bf_season,
+               y = n,
+               fill = data),
+           position = "dodge",
+           width = 0.23) +
+  colorspace::scale_fill_discrete_qualitative(labels = c("clustering", "historical")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Fire ignitions by bushfire season",
+       x = "bushfire season",
+       y = "number of ignitions")
+
+
+# --- fire ignitions by month
+p2 <- left_join(cluster_16_21_count_month, cause_join_count_month,
+          by = c("bf_season", "month")) %>% 
+  rename(total_cluster = n.x,
+         total_join = n.y) %>% 
+  pivot_longer(cols = total_cluster:total_join,
+               names_to = "data",
+               values_to = "n") %>% 
+  ggplot() +
+  geom_col(aes(x = factor(month,
+                          levels = c(10, 11, 12, 1, 2, 3)),
+               y = n,
+               fill = data),
+           position = "dodge") +
+  facet_wrap(. ~ bf_season) + 
+  colorspace::scale_fill_discrete_qualitative(labels = c("clustering", "historical")) +
+  theme_bw() +
+  labs(title = "Fire ignitions each month facet by bushfire season",
+       x = "month",
+       y = "number of ignitions") 
+  
+
+p1 / p2 +
+  plot_layout(guides = "collect")
+```
+
+    bar plot comparison 
+Historical data is available from 2000 up to end of 2020 (note: 2019 data from January to March is missing). While satellite data can be obtained up till the present. The satellite data used here is the clustered satellite data. 
+
+This section compares the agreeableness between both datsets in of number of bushfire ignitions ("points") in each raster grid cell. As we can see, the fire ignitions data sets do not match up exactly largely due to **how** the data was collected.
+
+Number of ignitions in each data set is plotted against bushfire season (top) and month (bottom) in Figure \@ref(fig:fire-bf-month) above. The lack of agreeableness both the datasets is apparent. In particular, there were considerably more bushfire ignitions in 2016-2017 bushfire season in the clustering data especially in the months January to March. Meanwhile in 2017-2018, there were more observations in the historical data set except for March. 
+
+```{r}
+# join no. of fires per cell; for historical & cluster data
+dplyr::inner_join(ignition_rasterize_training_sf_bf_season, ignition_rasterize_cluster_bf_season %>% sf::st_set_geometry(NULL),
+           by = c("id", "bf_season")) %>%
+  rename(fire_count_training = fire_count.x,
+         fire_count_cluster = fire_count.y) %>% 
+  # compute difference = historical - cluster
+  mutate(diff = fire_count_training - fire_count_cluster) %>% 
+  mutate(diff = case_when(
+    diff == 0 ~ NA_real_,
+    TRUE ~ diff
+  )) %>% 
+  tmap::tm_shape(name = "fire_count diff") +
+  tmap::tm_polygons(col = "diff",
+                    palette = "RdBu",
+                    n = 6,
+                    group = "diff",
+                    id = "id",
+                    alpha = 0.6) +
+  # facet by bushfire season  
+  tmap::tm_facets(by = "bf_season",
+                  ncol = 1) +
+  
+  # include Vic map outline
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) +
+  
+  # baselayer
+  tmap::tm_basemap(leaflet::providers$OpenStreetMap)
+```
+
+    
+    
+    
+    Spatial distribution comparison 
+We also compared differences in the spatial distributions of ignitions in both the data sets by computing the difference in number of ignitions (points) contained within in cell i.e. historical ignitions - satellite ignitions per cell.
+
+The results is shown in the plot above. There is obvious differences in how the fire ignitions are scattered around the map. Historical data is more concentrated in the map while satellite data tend to be more scattered. There is also strikingly more observations near Melbourne CBD for historical data sets. Moreover, zooming in, we observe that most of ignitions observed in the historical data are highly accessible by road while places where there is a much larger number for satellite data are in the remote areas. This speaks to the fact that most ignitions are caused by lightning (https://theconversation.com/open-data-shows-lightning-not-arson-was-the-likely-cause-of-most-victorian-bushfires-last-summer-151912).
+
+
+    Conclusion
+There are a few hypothesis pertaining to the inaccuracies of the historical data. Firstly, it is difficult to distinguish the number of fires one observes with the naked eye. For the same reason, it is less accurate and more subjective to gauge the location of a fire. Recording bushfires in this manner also prevents remote areas from being surveyed. Equally important is that we might also need to check the consistency of fire tower manning at each station. Another thing to note is that the number of bushfires is significantly lower from October to November, this could be due to filtering the clustered satellite data to include only bigger fires. 
+
+# Modelling
+The most common choice for bushfire risk modelling is the generalised additive model (GAM), which is used by Bates, McCaw, and Dowdy (2018) to predict the number of lightning ignitions in Western Australia. Simpler parametric models have also been used to predict the risk of bushfire, including multiple linear regression and generalized logistic regression.  The predictors used for these models are environmental variables like weather variables and vegetation types. *However, none of the models use hotspot data to predict the risk of bushfire. *? 
+We use models like linear regression model, random forest, and lasso regression model to predict the risk of bushfire in Victoria by using the hotspot data. Firstly, we fit a simple linear model to obtain a general insight of the data. We use all variables in the final dataset, which have been explained before, as our predictors. These variables are chosen based on our research about past bushfire risk modelling. This model provides some interesting insights with some predictors being not significant for the model. Average rainfall for that month has a positive correlation with the number of fires while average rainfall for the two months and three months have a negative correlation with the number of fires. Similar thing with maximum temperature, where average maximum temperature for the month and for the two months have a positive relationship with fire counts while average maximum temperature in three months has a negative relationship. This might be due to the non-linear relationship between environmental variables and fire counts. By fitting a linear model, we are assuming that the relationship between the predictors and the response is linear, when in reality it is not. As expected, the linear model has an adjusted R-squared of 0.1452. This indicates that only 14.52% variations in the data are explained by the model, thus a linear regression is not a good model for predicting the risk of bushfire. 
+Random forest (Breiman, 2001) is a supervised learning technique that is constructing hundreds of regression trees by using ensemble learning, combined to a robust prediction model. It consists of a large number of decision trees, which are combined by taking the mean of the predicted y values as the prediction of all trees. A random forest model is built from a bootstrap sample of the data. Each tree at each parent node is constructed from p randomly selected predictors (https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0229509). The trees run in parallel without any interactions amongst them (https://levelup.gitconnected.com/random-forest-regression-209c0f354c84). Random forest is well suited for non-linear relationships, which is suitable for our case as the relationship between environmental variables and the fire risk is non-linear. 
+An issue with modelling the risk of bushfire based on environmental variable is the collinearity between variables. For example, relative humidity changes when temperature changes. Random forest model can handle multicollinearity problem well as it offers protection against the impact of collinearity between predictors (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4710485/)/. Even though multicollinearity is not a problem for the random forest algorithm itself, it might be a problem for the variable importance. Feature importance might be affected by multicollinearity as the importance of variables with high collinearity will be offset by each other. 
+Based on our previous analysis, month is an important variable in determining the risk of fire as the risk of bushfire differs monthly. We use month as a factor variable in our model. The number of variables randomly sampled at each split (mtry) is chosen by using the caret package (citation). The random forest model fitted with 
+
+
+## lasso regression 
+A lasso regresion was implemented to parse out the important variables. Depending on the penalty ($\lambda$) term imposed on the least square optimisation problem has the effect of shrinking (unimportnat) variables to zero/very small coefficient. When $\lambda = 0$, no parameters are elimated and the estimate equal to the one found in least squares. When $\lambda$ increases, more and more coefficients are set to 0 and eliminated. When $\lambda = \infty$, all coefficients are eliminated.
+
+To choose a suitable $\lambda$ value, 5-fold cross validation is applied. Using a $\lambda$ grid consisting of 50 levels from 0 to 10 which is the default for `tune::penalty()`. For each cross-validation fold, the regularised lasso regression model is fitted and $R^2$ and $RMSE$ was recorded. The results is shown in Figure \@ref(fig:lasso-metric) *note results are on log10 scale. The $lambda$ value that minimises the RMSE was chosen which is found to be $1.0001$. 
+
+```{r lasso-metric, fig.cap="mean RMSE(top) and R^2 (bottom) against penalty term"}
+lasso_grid %>% 
+  # obtain tuning results; across performance metrics (`.estimator`)
+  tune::collect_metrics() %>% 
+  # plot
+  ggplot(aes(x = penalty,
+             y = mean,
+             colour = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err)) +
+  geom_line(size = 1.5) +
+  # facet by `.metric`
+  facet_wrap(~ .metric,
+             scales = "free",
+             nrow = 2) +
+  # penalty in log10 scale
+  scale_x_log10() +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+To sum up, we extracted and plotted (in Figure \@ref(fig:vi)) the variable important scores for the predictors in the model. That is, the variables that coeffients remained consistently relatively higher despite the regularisation effect. Their effects (positive/negative) are coloured respectively. Correspondingly, the feature weights as $\lambda$ increases is shown in \@ref(fig:coefs-lasso)
+
+```{r vi, fig.cap="variable importance plot from lasso regression"}
+# --- plot variable importance
+final_lasso %>% 
+  parsnip::fit(train) %>% 
+  # extract model fit
+  workflows::extract_fit_parsnip() %>% 
+  # compute variable importance scores for predictors
+  vip::vi(lambda = lowest_rmse$penalty) %>% 
+  # absolute `Importance`; for plotting
+  mutate(Importance = abs(Importance)) %>% 
+  # plot 
+  ggplot(aes(x = Importance,
+             y = fct_reorder(Variable,
+                             Importance),
+             fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(y = NULL) +
+  theme_bw() +
+  colorspace::scale_fill_discrete_qualitative()
+```
+
+```{r coefs-lasso}
+lasso_grid_coefs <- lasso_grid %>% 
+  select(id, .extracts) %>% 
+  unnest(.extracts) %>% 
+  unnest(.extracts)
+
+p <- lasso_grid_coefs %>% 
+  ggplot() + 
+  geom_line(aes(x = lambda, 
+                y = estimate, 
+                group = term,
+                colour = term)) +
+  scale_x_log10() +
+  labs(title = "effect on lambda on feature coefficients") +
+  theme_bw()  
+
+plotly::ggplotly(p)
+```
+
+
+
+
+
+
+
+

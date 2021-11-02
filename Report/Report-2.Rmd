@@ -9,6 +9,7 @@ output: html_document
 ```{r setup, echo=FALSE, message = FALSE, warning= FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 library(dplyr)
+library(tidyverse)
 library(readr)
 library(sp)
 library(mapview)
@@ -60,7 +61,6 @@ The clustering algorithm slices the data by its temporal dimension and splits th
 
 ## Data integration
 -- Talks about lagged variables bcs this might be important. The risk of fire happening might be affected by the average weather conditions for the two months or even a year. A hotter and drier year might result to more fires than --
-
 
 
 ```{r, echo = FALSE}
