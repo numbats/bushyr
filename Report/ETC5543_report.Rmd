@@ -25,25 +25,25 @@ library(tidymodels)
 
 ```{r load-data, eval=FALSE}
 # --- load ALL variables from ida.Rmd & eda.Rmd
-load(here::here("data/eda.Rdata"))
-load(here::here("data/ida.Rdata"))
+load(here::here("data/eda.RData"))
+load(here::here("data/ida.RData"))
 ```
 
 ```{r, eval=FALSE}
 # --- save `eda.Rmd` variables
 save(cluster_16_21_sf, ignition_raster_values_cluster_bf_season, ignition_rasterize_cluster_bf_season, vic_map_sf, vic_raster_crop_values_join, cause_join_count_bf_season, cluster_16_21_count_bf_season, cluster_16_21_count_month, cause_join_count_month, ignition_rasterize_training_sf_bf_season, ignition_rasterize_cluster_bf_season,
-     file = "data/eda_report.Rdata")
+     file = "data/eda_report.RData")
 
 # --- save `ida.Rmd` variables
 save(max_temp_raster_crop, lasso_grid, final_lasso, train, test, lowest_rmse,
-     file = "data/ida_report.Rdata")
+     file = "data/ida_report.RData")
 ```
 
 
 ```{r}
 # --- load relevant variables 
-load(here::here("data/eda_report.Rdata"))
-load(here::here("data/ida_report.Rdata"))
+load(here::here("data/eda_report.RData"))
+load(here::here("data/ida_report.RData"))
 ```
 
 Bushfires is a common and natural phenomenon that occurs frequently in many places around the world. Victoria however, is one of the most fire-prone region in the world, given its fire conducive weather and fuel conditions. Fire ignitions are most commonly caused naturally by lightning or can also be man-made such as through planned burning off, accidents or arson. 
