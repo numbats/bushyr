@@ -36,9 +36,15 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = FALSE, 
+											message = FALSE, 
+											warning = FALSE)
+```
+
+```{r}
 library(tidyverse)
-Sys.setlocale("LC_ALL","English")
+library(leaflet)
+library(tmap)
 ```
 
 ```{r titleslide, child="components/titleslide.Rmd"}
@@ -438,127 +444,297 @@ p <-training %>%
 ---
 # 📐 Modelling risk
 
-- Compare hotspots (2016-2021) with historical fire origins: hotspots appears to be more reliable for locating fire ignitions, and in remote locations
-- Grid spatially, proportion of fires in each cell, for each season
-- Model proportions based on metadata, using random forest
- 
+.pull-left[
+- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Proportion of fire ignitions in spatial grid computed, for each season
+- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
 
+.monash-gray50[Grid spatially]
+] 
 
-```{r eval=FALSE}
-library(kableExtra)
-data.frame(model = c("Multinomial logistic regression", "GAM multinomial logistic regression", "Random forest", "XGBoost"), 
-           Accuracy = c(0.53, 0.68, 0.75, 0.74),
-           AUC = c(0.74, 0.82, 0.88, 0.88)) %>%
-  `colnames<-`(c("Model", "Accuracy", "Muti-class AUC")) %>%
-  knitr::kable("html")  %>%
-  kable_classic(full_width = F, html_font = "Cambria") %>%
-  kable_styling(font_size = 20)
+.pull-right.wider[
+```{r out.width="100%"}
+load(here::here("data/eda_report.Rdata"))
+tmap::tmap_mode("view")
+
+# --- plot Victoria map; in 20x20 grid cells
+as(vic_raster_crop_values_join$id, "SpatialPolygonsDataFrame") %>% # random raster; with Victoria bbox
+  sf::st_as_sf() %>% 
+  tmap::tm_shape() +
+  tmap::tm_polygons(alpha = 0.3,
+                    id = "id") +
+  # --- draw outline of Victoria
+  tmap::tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) + # line width
+  tmap::tm_layout(main.title = "Map of Victoria in 20x20 grid cells") +
+  tmap::tm_basemap(leaflet::providers$OpenStreetMap)
 ```
-
-
-
-```{r eval=FALSE}
-data.frame(Lightning = c(703, 51, 18, 5, 777), 
-           Accident = c(77, 494, 55, 8, 634),
-           Arson = c(50, 89, 175, 11, 325),
-           Burning_off = c(44, 38, 22, 32, 136),
-           Total = c(874, 672, 270, 56, 1872)) %>%
-  mutate(Lightning = c(paste0(Lightning[1:4], " (", round(Lightning[1:4]/Lightning[5], 2), ")" ), paste0(Lightning[5]))) %>%
-  mutate(Accident = c(paste0(Accident[1:4], " (", round(Accident[1:4]/Accident[5], 2), ")" ), paste0(Accident[5]))) %>%
-  mutate(Arson = c(paste0(Arson[1:4], " (", round(Arson[1:4]/Arson[5], 2), ")" ), paste0(Arson[5]))) %>%
-  mutate(Burning_off = c(paste0(Burning_off[1:4], " (", round(Burning_off[1:4]/Burning_off[5], 2), ")" ), paste0(Burning_off[5]))) %>%
-  `row.names<-`(c("Prediction:Lightning", "Prediction:Accident", "Prediction:Arson", "Prediction:Burning_off", "Total")) %>%
-  knitr::kable("html")  %>%
-  kable_classic(full_width = F, html_font = "Cambria") %>%
-  kable_styling(font_size = 20)
-  
-```
-
-
-```{r eval=FALSE}
-if (!file.exists("images/varimp.png")){
-  
-   explaination <- readRDS("data/lime_ex2.rds")
-  
-  name_dict <- list("log_dist_camp" = "Log distance to the nearest camping site",
-       "log_dist_cfa" = "Log distance to the nearest CFA station",
-       "log_dist_road" = "Log distance to the nearest road",
-       "lon" = "longitude",
-       "lat" = "Latitude",
-       "ase180" = "Average solar exposure in the past 180 days",
-       "arf360" = "Average rainfall in the past 360 days",
-       "ase90" = "Average solar exposure in the past 90 days",
-       "aws_m24" = "Average wind speed in the past 24 months",
-       "aws_m12" = "Average wind speed in the past 12 months")
-  
-  
-  explaination %>%
-  mutate(label = factor(tools::toTitleCase(label), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
-    mutate(feature = unlist(name_dict[feature])) %>%
-  ggplot() +
-    geom_boxplot(aes(feature_weight, feature), outlier.size = 0.5) +
-    geom_vline(xintercept = 0, col = "red") +
-    ylab("feature") +
-    facet_wrap(~label, ncol = 2) +
-    xlab("Feature Weight") +
-    ylab("Feature") +
-    theme_minimal(base_size = 20) -> p
-  ggsave(p, filename = "images/varimp.png", height = 6, width = 12, dpi = 600)
-}
-```
-
-
-```{r out.width="100%", eval=FALSE}
-library(ggthemes)
-library(rnaturalearth)
-library(lubridate)
-au_map <- ne_states(country = 'Australia', returnclass = 'sf')
-vic_map <- au_map[7,]
-
-read_csv("data/prediction_2019-2020.csv") %>%
-  mutate(cause = factor(tools::toTitleCase(cause), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
-  ggplot() +
-  geom_sf(data = vic_map, fill = "grey99") +
-  geom_point(aes(lon, lat, col = cause, text = paste0("Mon: ", month.abb[month(time)])), size = 1.5, alpha = 1) +
-  theme_map(base_size = 20) +
-  theme(legend.position = "right") +
-  # facet_wrap(~factor(month.abb[month(time)], levels = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"))) +
-  scale_color_brewer(palette = "RdBu")-> p
-
-library(plotly)
-
-
-ggplotly(p, tooltip = c("colour", "text"))
-
-```
+]
 
 ---
-# 🔭 Plan for completion
+count: false
+# 📐 Modelling risk
 
-- Shiny app: user interaction
-- 
+.pull-left[
+- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Proportion of fire ignitions in spatial grid computed, for each season
+- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
 
-```{r eval=FALSE}
-read_csv("data/prediction_2019-2020.csv") %>%
-  mutate(cause = factor(tools::toTitleCase(cause), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
-  mutate(month = factor(month.abb[month(time)], levels = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"))) %>%
-  group_by(cause, month) %>%
-  count() %>%
-  ungroup() %>%
-  rename(Cause = cause) %>%
-  spread(month, n) -> temp
+.monash-gray50[2016-2017]
+] 
 
-temp[is.na(temp)] <- 0
-
-temp$Total <- temp$Oct + temp$Nov + temp$Dec + temp$Jan + temp$Feb + temp$Mar
-temp$Total <- paste0(temp$Total, " (", round(temp$Total/sum(temp$Total), 2), ")")
-
-temp  %>%
-  knitr::kable("html")  %>%
-  kable_classic(full_width = F, html_font = "Cambria") %>%
-  kable_styling(font_size = 20)
+.pull-right.wider[
+```{r out.width="100%"}
+cluster_map_bf_season <- ignition_rasterize_cluster_bf_season %>% 
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count)) %>% 
+  filter(bf_season == "2016-2017") %>% 
+  tmap::tm_shape(name = "cell fire ignition count") +
+  tmap::tm_polygons(col = "fire_count",
+                    id = "id",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
+                    palette = "YlOrRd",
+                    alpha = 0.4,
+                    colourNA = "grey",
+                    legend.show = F) + 
   
+  # --- add ignition points (to buffer as necessary)
+  tmap::tm_shape(cluster_16_21_sf %>% filter(bf_season == "2016-2017"),
+                 name = "fire ignition points") +
+  tmap::tm_bubbles(# col = "cause",
+                   size = 0.2,
+                   alpha = 0.1,
+                   id = "") +
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- themes
+  tmap::tm_layout(legend.show = F) +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "number of bushfire ignitions across Victoria")
+
+cluster_map_bf_season
 ```
+]
+
+---
+count: false
+# 📐 Modelling risk
+
+.pull-left[
+- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Proportion of fire ignitions in spatial grid computed, for each season
+- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+
+.monash-gray50[2017-2018]
+] 
+
+.pull-right.wider[
+```{r out.width="100%"}
+cluster_map_bf_season <- ignition_rasterize_cluster_bf_season %>% 
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count)) %>% 
+  filter(bf_season == "2017-2018") %>% 
+  tmap::tm_shape(name = "cell fire ignition count") +
+  tmap::tm_polygons(col = "fire_count",
+                    id = "id",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
+                    palette = "YlOrRd",
+                    alpha = 0.4,
+                    colourNA = "grey",
+                    legend.show = F) + 
+  
+  # --- add ignition points (to buffer as necessary)
+  tmap::tm_shape(cluster_16_21_sf %>% filter(bf_season == "2017-2018"),
+                 name = "fire ignition points") +
+  tmap::tm_bubbles(# col = "cause",
+                   size = 0.2,
+                   alpha = 0.1,
+                   id = "") +
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- themes
+  tmap::tm_layout(legend.show = F) +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "number of bushfire ignitions across Victoria")
+
+cluster_map_bf_season
+```
+]
+
+---
+count: false
+# 📐 Modelling risk
+
+.pull-left[
+- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Proportion of fire ignitions in spatial grid computed, for each season
+- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+
+.monash-gray50[2018-2019]
+] 
+
+.pull-right.wider[
+```{r out.width="100%"}
+cluster_map_bf_season <- ignition_rasterize_cluster_bf_season %>% 
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count)) %>% 
+  filter(bf_season == "2018-2019") %>% 
+  tmap::tm_shape(name = "cell fire ignition count") +
+  tmap::tm_polygons(col = "fire_count",
+                    id = "id",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
+                    palette = "YlOrRd",
+                    alpha = 0.4,
+                    colourNA = "grey",
+                    legend.show = F) + 
+  
+  # --- add ignition points (to buffer as necessary)
+  tmap::tm_shape(cluster_16_21_sf %>% filter(bf_season == "2018-2019"),
+                 name = "fire ignition points") +
+  tmap::tm_bubbles(# col = "cause",
+                   size = 0.2,
+                   alpha = 0.1,
+                   id = "") +
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- themes
+  tmap::tm_layout(legend.show = F) +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "number of bushfire ignitions across Victoria")
+
+cluster_map_bf_season
+```
+]
+
+---
+count: false
+# 📐 Modelling risk
+
+.pull-left[
+- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Proportion of fire ignitions in spatial grid computed, for each season
+- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+
+.monash-gray50[2019-2020]
+] 
+
+.pull-right.wider[
+```{r out.width="100%"}
+cluster_map_bf_season <- ignition_rasterize_cluster_bf_season %>% 
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count)) %>% 
+  filter(bf_season == "2019-2020") %>% 
+  tmap::tm_shape(name = "cell fire ignition count") +
+  tmap::tm_polygons(col = "fire_count",
+                    id = "id",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
+                    palette = "YlOrRd",
+                    alpha = 0.4,
+                    colourNA = "grey",
+                    legend.show = F) + 
+  
+  # --- add ignition points (to buffer as necessary)
+  tmap::tm_shape(cluster_16_21_sf %>% filter(bf_season == "2019-2020"),
+                 name = "fire ignition points") +
+  tmap::tm_bubbles(# col = "cause",
+                   size = 0.2,
+                   alpha = 0.1,
+                   id = "") +
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- themes
+  tmap::tm_layout(legend.show = F) +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "number of bushfire ignitions across Victoria")
+
+cluster_map_bf_season
+```
+]
+
+
+---
+count: false
+# 📐 Modelling risk
+
+.pull-left[
+- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Proportion of fire ignitions in spatial grid computed, for each season
+- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+
+.monash-gray50[2020-2021]
+] 
+
+.pull-right.wider[
+```{r out.width="100%"}
+cluster_map_bf_season <- ignition_rasterize_cluster_bf_season %>% 
+  mutate(fire_count = case_when(
+    fire_count == 0 ~ NA_real_,
+    TRUE ~ fire_count)) %>% 
+  filter(bf_season == "2020-2021") %>% 
+  tmap::tm_shape(name = "cell fire ignition count") +
+  tmap::tm_polygons(col = "fire_count",
+                    id = "id",
+                    style = "fixed",
+                    breaks = c(0, 10, 20, 30, 40, 50),
+                    palette = "YlOrRd",
+                    alpha = 0.4,
+                    colourNA = "grey",
+                    legend.show = F) + 
+  
+  # --- add ignition points (to buffer as necessary)
+  tmap::tm_shape(cluster_16_21_sf %>% filter(bf_season == "2020-2021"),
+                 name = "fire ignition points") +
+  tmap::tm_bubbles(# col = "cause",
+                   size = 0.2,
+                   alpha = 0.1,
+                   id = "") +
+  
+  # --- vic_map_sf (draw outline of Victoria )
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # border line width 
+  
+  # --- themes
+  tmap::tm_layout(legend.show = F) +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "number of bushfire ignitions across Victoria")
+
+cluster_map_bf_season
+```
+]
+
+
+---
+background-image: url(images/shiny_plan.png)
+background-size: 80%
+
+# 🔭 Plan for completion: shiny app
+
+
 
 ---
 # AT&T Collaboration

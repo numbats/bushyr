@@ -11,7 +11,7 @@ count: false
 
 Slides produced using [Rmarkdown](https://github.com/rstudio/rmarkdown) with [xaringan](https://github.com/yihui/xaringan) styling. Monash style by the kunoichi, Dr Emi Tanaka. 
 
-Data and code for analysis is available on [Weihao's GitHub repo](https://github.com/TengMCing/bushfire-paper). Shiny app code is available at [Chang's GitHub repo](https://github.com/timtam3/Bushfire/tree/master/VICfire).
+`spotoroo` package is available on CRAN and [Patrick's GitHub repo](https://github.com/TengMCing/spotoroo). Current developments are available at [bushyr GitHub repo](https://github.com/numbats/bushyr).
 
 # Thanks for listening!
 
