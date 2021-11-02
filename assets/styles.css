@@ -75,6 +75,11 @@ a {
   text-decoration: none;
 }
 
+a h1 h2 {
+  color: #FFFFFF;
+  text-decoration: none;
+}
+
 .footnote {
   position: absolute;
   bottom: 0;

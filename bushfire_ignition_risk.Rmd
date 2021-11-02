@@ -51,18 +51,24 @@ Sys.setlocale("LC_ALL","English")
 *Motivation*: The collaboration would develop risk models and visualisations, to monitor potential fire ignitions and track fires from satellite hotspots, in real-time, for the 2021-2022 Victorian bushfire season. These will be made these publicly available by extending the existing web app.
 
 *Team*:
+  - Helen Evangelista, Monash Master of Business Analytics
+  - Brenwin Ang, Monash Master of Business Analytics
+  - Prof Di Cook, EBS, Monash
+  - Emily Dodwell, AT&T
+  - Chris Volinsky, AT&T
+  - Weihao (Patrick) Li, EBS, Monash, PhD student
 
 
 ---
 
-# 🗺 Background
+# 🗺 Background: Patrick's Honours research
 
-1. Algorithm to detect bushfire ignition from hotspot data, published in R package `spotoroo` and upcoming R Journal article
-2. Model to predict the cause of bushfire ignition, using historical data, and metadata, temperature, precipitation, winds, radiation, vegetation/fuel layer, roads, recreation sites, CFA stations. 
-3. Prediction of the causes of the 2019-2020 Australia bushfires
-4. A complete and adaptable workflow for monitoring and understanding new ignitions from hotspot data
-5. Shiny app for exploration of historical fire origins, predicted causes of 2019-2020 fires and future fire risk maps
-6. All work conducted with open data and open source software.
+1. .monash-blue2[Algorithm] to detect bushfire ignition from hotspot data, published in R package `spotoroo` and upcoming R Journal article.
+2. .monash-blue2[Model to predict the cause] of bushfire ignition, using historical data, and metadata, temperature, precipitation, winds, radiation, vegetation/fuel layer, roads, recreation sites, CFA stations. 
+3. Prediction of the .monash-blue2[causes of the 2019-2020] Victorian bushfires
+4. A .monash-blue2[complete and adaptable workflow] for monitoring and understanding new ignitions from hotspot data.
+5. **.monash-orange2[Shiny app] for exploration of historical fire origins, predicted causes of 2019-2020 fires and .monash-orange2[future fire risk maps].**
+6. All work conducted with .monash-blue2[open data and open source software].
 
 ---
 # Shiny app: https://ebsmonash.shinyapps.io/VICfire/
@@ -74,10 +80,27 @@ knitr::include_app("https://ebsmonash.shinyapps.io/VICfire/", height = "550px")
 ---
 # Data sources update
 
-- 📡 Remote sensing data for 2016/2017-2020/2021 seasons converted into fire ignition locations: Japan Aerospace Exploration Agency  provides a hotspot product (reflected energy from the earth) taken from the **Himawari-8** satellite.
-- 🔥 Historical fire origins for 2019/2020: can compare our predictions for that season now.
-- 🌦️🌿⛺ Metadata: updated and expanded for all seasons
+- Remote sensing $^a$ data 📡 for all seasons (2016/2017-2020/2021) .monash-blue2[clustered to identify fire ignition] spots. 
+- Historical fire origins 🔥 for 2019/2020: can .monash-blue2[compare] our predictions for that season now.
+- Metadata 🌦️🌿⛺: updated and expanded for all seasons
+    - [SILO](https://www.longpaddock.qld.gov.au/silo/): max_temp, rh, radiation, et_short_crop, daily_rain
+    - [ERA5 Reanalysis data](https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels-monthly-means?tab=overview): lai_hv, lai_lv, WS10
+    - [BoM’s AWRA-L](http://www.bom.gov.au/water/landscape/#/sm/Actual/month/-26.32/132.54/3/Point/Separate/-15.6/130.25/2021/4/30/): s0_pct
+    - [DELWP](https://discover.data.vic.gov.au/dataset/forest-types-of-victoria): forest cover
 
+
+
+<br>
+$^a$ Japan Aerospace Exploration Agency  provides a hotspot product (reflected energy from the earth) taken from the **Himawari-8** satellite.
+
+```{r eval=FALSE}
+load(here::here("data/eda_report.Rdata"))
+library(readxl)
+fires_19_20 <- read_xlsx(here:here("data/2021WildfiresNotInDIPaginatedReport_20210727.xlsx"), sheet=2, n_max=3)
+fires_19_20 <- read_csv(here:here("data/2021WildfiresNotInDIPaginatedReport_20210727_2.csv"))
+
+load(here:here("data/fires_19_20.rda")
+```
 
 ```{r eval=FALSE}
 if (!file.exists("images/hotspots_before.png")){
@@ -415,8 +438,10 @@ p <-training %>%
 ---
 # 📐 Modelling risk
 
-.monash-blue[ Something]
-
+- Compare hotspots (2016-2021) with historical fire origins: hotspots appears to be more reliable for locating fire ignitions, and in remote locations
+- Grid spatially, proportion of fires in each cell, for each season
+- Model proportions based on metadata, using random forest
+ 
 
 
 ```{r eval=FALSE}
@@ -510,6 +535,8 @@ ggplotly(p, tooltip = c("colour", "text"))
 ---
 # 🔭 Plan for completion
 
+- Shiny app: user interaction
+- 
 
 ```{r eval=FALSE}
 read_csv("data/prediction_2019-2020.csv") %>%
@@ -534,6 +561,14 @@ temp  %>%
 ```
 
 ---
+# AT&T Collaboration
+
+<video width="960" height="720" controls>
+  <source src="ACEMS-ATT-Take1.mp4" type="video/mp4">
+</video>
+
+---
+count: false
 
 # Relevance to Telecommunications Industry
 
@@ -551,7 +586,6 @@ temp  %>%
 	+ Published a white paper entitled *The Road to Climate Resiliency*
 * ACEMS research collaboration to predict wildfire risk is aligned with AT&T's climate resiliency efforts
 * Development of tools and methods for analytics and visualization of wildfire incidence are generalizable and extendable to other geographies
-
 
 
 ---
