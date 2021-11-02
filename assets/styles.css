@@ -250,3 +250,11 @@ th, td {
 .font_my_2 {
   font-size: 16pt;
 }
+
+.pad0 {
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 100px;
+  padding-right: 0;
+}
+

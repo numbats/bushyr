@@ -563,9 +563,11 @@ temp  %>%
 ---
 # AT&T Collaboration
 
+<div align="center">
 <video width="960" height="720" controls>
   <source src="ACEMS-ATT-Take1.mp4" type="video/mp4">
-</video>
+</video> 
+</div>
 
 ---
 count: false
