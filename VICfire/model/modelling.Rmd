@@ -845,6 +845,157 @@ tm_shape(mar_raster_actual) +
   tmap::tm_borders(lwd = 3)
 ```
 
+# correlation between variables
+```{r}
+library(GGally)
+data2 <- data_lagged_omitted %>%
+  ungroup() %>%
+  dplyr::select(-id, -x, -y, -year) 
+ggcorr(data2, label = T)
+```
+ a lot of variables are highly correlated.
+
+```{r}
+# splitting the data
+data_split <- initial_split(data_lagged_omitted, prop = 0.7)
+data_train <- training(data_split)
+data_test <- testing(data_split)
+
+
+data2 <- data_lagged_omitted %>% ungroup() %>% dplyr::select(-id, -x, -y, -year) %>% 
+  mutate(month = as.factor(month))
+
+set.seed(2021)
+rfmodel1 <- randomForest(fire_count ~ ., data = data2, importance = TRUE) 
+rfmodel1
+```
+-- based on https://algotech.netlify.app/blog/interpreting-black-box-regression-model-with-lime/ -- 
+```{r}
+# predicting
+predicted <- predict(rfmodel1, data2, type = "response")
+
+# Function for evaluating model
+eval_recap <- function(truth, estimate){
+  
+  df_new <- data.frame(truth = truth,
+                       estimate = estimate)
+  
+  data.frame(RMSE = rmse_vec(truth, estimate),
+             MAE = mae_vec(truth, estimate),
+             "R-Square" = rsq_vec(truth, estimate),
+             check.names = F
+             ) %>% 
+    mutate(MSE = sqrt(RMSE))
+}
+
+eval_recap(truth = data2$fire_count,
+           estimate = predicted)
+```
+
+```{r}
+set.seed(2021)
+
+explainer <- lime(x = data2,
+                  model = rfmodel1) 
+```
+
+```{r}
+# dealing with model_type error
+model_type.randomForest <- function(x){
+  return("regression") # for regression problem
+}
+
+predict_model.randomForest <- function(x, newdata, type = "response") {
+
+    # return prediction value
+    predict(x, newdata) %>% as.data.frame()
+    
+}
+
+# sampling data
+data_low <- data2 %>% filter(fire_count < 5)
+data_high <- data2 %>% filter(fire_count>5)
+
+set.seed(2021)
+lime_sample1 <- sample(1:length(data_low),4)
+lime_sample2 <- sample(1:length(data_high),4)
+
+data_selected1 <- data_low[lime_sample1, ]
+data_selected2 <- data_high[lime_sample2, ]
+data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
+  dplyr::select(-fire_count)
+explanation <- explain(x = data_selected,
+                       explainer = explainer, 
+                       feature_select = "auto",
+                       n_features = 15)
+
+explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
+explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
+```
+
+```{r}
+plot_features(explanation1)
+```
+important: max_temp, lai_hv2, si103, daily_rain, lai_hv, lai_hv3, 
+month, si10, rh, lai_lv, s0_pct3, radiation3, et_Short_crop, s0_pct, radiation, lai_lv2, lai_hv2, 
+
+```{r}
+plot_features(explanation2)
+```
+important: forest, month, si10, si102, s0_pct, si103, max_temp, radiation3, s0_pct2, radiation, daily_rain, so_pct3, rh, lai_hv2, st_short_crop, lai_hv3, lai_hv, lai_Lv,rh2,
+
+## fitting modl based on these variables
+```{r}
+set.seed(2021)
+rfmodel2 <- randomForest(fire_count ~ forest + month + si10 + si102 + s0_pct + si103 + max_temp + radiation3 + s0_pct2 + radiation + daily_rain + s0_pct3 + rh + lai_hv2 + et_short_crop + lai_hv3 + lai_hv + lai_lv + rh2, data = data2, importance = TRUE) 
+rfmodel2
+```
+using all variables is better.
+
+# parameter tuning
+
+```{r}
+plot(rfmodel1)
+```
+Error rate stabilises around 100 trees but keep decreasing slowly until around 300 trees. 
+
+```{r}
+which.min(rfmodel1$mse)
+```
+483 gives the lowest MSE.
+
+
+```{r}
+# splitting the data
+data_split <- initial_split(data_lagged_omitted, prop = 0.7)
+data_train <- training(data_split)
+data_test <- testing(data_split)
+
+set.seed(2021)
+rand1 <- randomForest(fire_count ~ .-year -id -x -y, data = data_lagged_omitted, importance = TRUE) 
+rand1
+```
+
+```{r}
+x <- data2 %>% dplyr::select(-fire_count)
+
+mtry <- tuneRF(x, data2$fire_count, ntreeTry=483,
+               stepFactor=1.5,improve=0.001, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(best.m)
+```
+9 gives the lowest error - 2.14
+
+```{r}
+
+set.seed(2021)
+rfmodel3 <- randomForest(fire_count ~ ., data = data2, importance = TRUE, ntree = 483, mtry = 9) 
+rfmodel3
+```
+ a bit better!
+
+
 
 --- with important variables ---- 
 ```{r}
