@@ -576,32 +576,273 @@ data_mar_final <- dataframe %>%
   dplyr::select(id, pred_risk) %>%
   mutate_all(~replace(., is.na(.), 0))
 
-data_mar_final <- data_mar_final %>% left_join(lonlat) %>%
-  dplyr::select(-id)
+data_mar_final <- data_mar_final %>% left_join(lonlat) 
 ```
 
 ```{r}
 library(rnaturalearth)
 library(sf)
+library(tmap)
 au_map <- ne_states(country = 'Australia', returnclass = 'sf')
 vic_map <- au_map[7,]
 
 vic_map_sf <- vic_map %>%
   st_as_sf(coords = c("lon", "lat"))
+```
 
-coordinates(data_mar_final) = c("x", "y")
-mar_raster <- rasterFromXYZ(data_mar_final)
-library(tmap)
-tm_shape(mar_raster$data$pred_risk) +
+# october
+```{r}
+data_oct_final <- data_oct_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_oct_final) = c("x", "y")
+oct_raster <- rasterFromXYZ(data_oct_final)
+
+tm_shape(oct_raster) +
   tm_raster(style = "cont", 
-            palette = "div",
+            palette = "seq",
                   alpha = 0.4) +
   tm_shape(vic_map_sf) +
   tmap::tm_borders(lwd = 3)
 ```
 
+## comparing with actual counts
 ```{r}
-mar_raster$pred_risk
+oct_data <- final_data %>%
+  filter(month == 10) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+oct_data <- dataframe %>%
+  left_join(oct_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+oct_data <- oct_data %>% left_join(lonlat)
+
+oct_data <- oct_data %>% 
+   dplyr::select(-id)
+
+coordinates(oct_data) = c("x", "y")
+oct_raster_actual <- rasterFromXYZ(oct_data)
+
+tm_shape(oct_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+
+# noovember
+```{r}
+data_nov_final <- data_nov_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_nov_final) = c("x", "y")
+nov_raster <- rasterFromXYZ(data_nov_final)
+
+tm_shape(nov_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+nov_data <- final_data %>%
+  filter(month == 11) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+nov_data <- dataframe %>%
+  left_join(nov_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+nov_data <- nov_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(nov_data) = c("x", "y")
+nov_raster_actual <- rasterFromXYZ(nov_data)
+
+tm_shape(nov_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+# december
+```{r}
+data_dec_final <- data_dec_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_dec_final) = c("x", "y")
+dec_raster <- rasterFromXYZ(data_dec_final)
+
+tm_shape(dec_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+dec_data <- final_data %>%
+  filter(month == 12) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+dec_data <- dataframe %>%
+  left_join(dec_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+dec_data <- dec_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(dec_data) = c("x", "y")
+dec_raster_actual <- rasterFromXYZ(dec_data)
+
+tm_shape(dec_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+# january
+```{r}
+data_jan_final <- data_jan_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_jan_final) = c("x", "y")
+jan_raster <- rasterFromXYZ(data_jan_final)
+
+tm_shape(jan_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+jan_data <- final_data %>%
+  filter(month == 1) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+jan_data <- dataframe %>%
+  left_join(jan_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+jan_data <- jan_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(jan_data) = c("x", "y")
+jan_raster_actual <- rasterFromXYZ(jan_data)
+
+tm_shape(jan_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+# february
+```{r}
+data_feb_final <- data_feb_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_feb_final) = c("x", "y")
+feb_raster <- rasterFromXYZ(data_feb_final)
+
+tm_shape(feb_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+feb_data <- final_data %>%
+  filter(month ==2) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+feb_data <- dataframe %>%
+  left_join(feb_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+feb_data <- feb_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(feb_data) = c("x", "y")
+feb_raster_actual <- rasterFromXYZ(feb_data)
+
+tm_shape(feb_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+# march
+```{r}
+data_mar_final <- data_mar_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_mar_final) = c("x", "y")
+mar_raster <- rasterFromXYZ(data_mar_final)
+library(tmap)
+tm_shape(mar_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+mar_data <- final_data %>%
+  filter(month == 3) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+mar_data <- dataframe %>%
+  left_join(mar_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+mar_data <- mar_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(mar_data) = c("x", "y")
+mar_raster_actual <- rasterFromXYZ(mar_data)
+
+tm_shape(mar_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
 ```
 
 
