@@ -122,7 +122,8 @@ a h1 h2 {
 }
 .pull-right {
   float: right;
-  width: 47%;
+  padding-left: 10px;
+  width: 50%;
 }
 
 .grid, .grid-col, .grid-row {

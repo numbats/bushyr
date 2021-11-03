@@ -445,9 +445,9 @@ p <-training %>%
 # 📐 Modelling risk
 
 .pull-left[
-- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Hotspots (2016-2021) more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
 - Proportion of fire ignitions in spatial grid computed, for each season
-- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+- Metadata, including lag variables, used to model proportions, using random forest (GLM and lasso)
 
 .monash-gray50[Grid spatially]
 ] 
@@ -476,9 +476,9 @@ count: false
 # 📐 Modelling risk
 
 .pull-left[
-- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Hotspots (2016-2021) more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
 - Proportion of fire ignitions in spatial grid computed, for each season
-- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+- Metadata, including lag variables, used to model proportions, using random forest (GLM and lasso)
 
 .monash-gray50[2016-2017]
 ] 
@@ -527,9 +527,9 @@ count: false
 # 📐 Modelling risk
 
 .pull-left[
-- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Hotspots (2016-2021) more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
 - Proportion of fire ignitions in spatial grid computed, for each season
-- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+- Metadata, including lag variables, used to model proportions, using random forest (GLM and lasso)
 
 .monash-gray50[2017-2018]
 ] 
@@ -578,9 +578,9 @@ count: false
 # 📐 Modelling risk
 
 .pull-left[
-- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Hotspots (2016-2021) more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
 - Proportion of fire ignitions in spatial grid computed, for each season
-- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+- Metadata, including lag variables, used to model proportions, using random forest (GLM and lasso)
 
 .monash-gray50[2018-2019]
 ] 
@@ -629,9 +629,9 @@ count: false
 # 📐 Modelling risk
 
 .pull-left[
-- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Hotspots (2016-2021) more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
 - Proportion of fire ignitions in spatial grid computed, for each season
-- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+- Metadata, including lag variables, used to model proportions, using random forest (GLM and lasso)
 
 .monash-gray50[2019-2020]
 ] 
@@ -681,9 +681,9 @@ count: false
 # 📐 Modelling risk
 
 .pull-left[
-- Hotspots (2016-2021)more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
+- Hotspots (2016-2021) more reliable for locating fire ignitions, especially in remote locations than the first responder fire origins
 - Proportion of fire ignitions in spatial grid computed, for each season
-- Metadata, including lag variabes, used to model proportions, using random forest (GLM and lasso)
+- Metadata, including lag variables, used to model proportions, using random forest (GLM and lasso)
 
 .monash-gray50[2020-2021]
 ] 
