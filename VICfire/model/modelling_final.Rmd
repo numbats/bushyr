@@ -1013,3 +1013,29 @@ it's better for the test set?
 
 general rf tends to underpredicting.
 individual rf tends to overpredicting.
+
+```{r}
+model_summary(truth = comparison$fire_count, 
+              estimate = comparison$pred_values)
+```
+
+
+
+```{r}
+data_171 <- train %>% filter(id == 171)
+ rfmodel171 <-  randomForest(fire_count ~ .-id, data = data_171, importance = TRUE, mtry = 9, ntree = 447) 
+a <- rfmodel171$predicted
+```
+
+```{r}
+set.seed(2021)
+mse_values <- vector()
+for (i in 1:length(no_of_id)) {
+  data <- train %>% dplyr::select(-year) %>% filter(id == no_of_id[i])
+  rfmodel <-  randomForest(fire_count ~ .-id, data = data, importance = TRUE, mtry = 9, ntree = 447) 
+  mse <-  rfmodel$mse
+  mse_values[i] <- mse
+}
+mse <- tibble(mse_values)
+```
+
