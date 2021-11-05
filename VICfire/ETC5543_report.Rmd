@@ -1,5 +1,5 @@
 ---
-title: "ETC5543_report"
+title: "Development of Bushfire risk prediction web app Victoria using open data"
 author: "Helen & Brenwin"
 date: "30/10/2021"
 output: 
@@ -21,7 +21,7 @@ library(kableExtra)
 library(tidymodels)
 ```
 
-# Introduction
+# Introduction and Motivation
 
 ```{r load-data, eval=FALSE}
 # --- load ALL variables from ida.Rmd & eda.Rmd
@@ -50,16 +50,15 @@ Bushfires is a common and natural phenomenon that occurs frequently in many plac
 
 This report condenses the research work on bushffire risk modelling done by Brenwin Ang and Helen Evangelina as part of their internship for ETC5543 Business Analytics Creative Acitivity coursework. An extension to the work done by Di Cook, Emily Dodwell and Patrick Li on hotspot clustering algorithm. The overall goal to develop a Shiny web application and process to predict bushfire risk across Victoria, Australia. The github repository including Patrick's thesis can be found [here](https://github.com/numbats/bushyr).
 
-The resulting app seeks to improve accessibility to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change.
-
-# Motivation
+The resulting app seeks to improve accessibility to bushfire information, raise awareness to bushfires and provide data information & predictions to make informed decisions to better adapt to the many impacts of climate change.
 
 Effective bushfire management pivots around providing relevant and timely data to emergency management personnel and the public. In the past, we could only rely on ground intelligence and communication to detect fire. Harnessing satellite-enabled data can potentially enhance our preventative management techniques through early bushfire detection. Especially with its high temporal resolution over large areas. 
 
 The project uses empirical evidence-based method to identify weather and landscape variables that are conducive to start a bushfire. And using those variables to predict a bushfire risk index across Australia into an app. 
 
 
-# EDA
+# Data Sources and Processing
+
 
 ## Map of Victoria
 ```{r vic_grid, fig.cap="Victoria bounding box gridded 20 by 20"}
@@ -79,11 +78,9 @@ as(vic_raster_crop_values_join$id, "SpatialPolygonsDataFrame") %>% # random rast
   tmap::tm_basemap(leaflet::providers$OpenStreetMap)
 ```
 
-The following data analysis is based on the map of Victoria that is divided into 20x20 cells (shown above). Note that only cells within Victoria were considered. Our study also only focuses on bushfire seasons where most fire ignitions happen which is from October through to March and data from 2016 to 2021. 
+The following data analysis is based off the map of Victoria that is divided into 20x20 cells (shown above). Note that only cells within Victoria were considered. Our study also only focuses on bushfire seasons where most fire ignitions happen which is from October through to March and data from 2016 to 2021. 
 
-## Data and pre-processing
-
-### Fire ignitions data
+## Fire ignitions data
 
 Fire ignitions are represented as spatial points on the map. There were two sources of bushfire ignitions data. 
 
@@ -182,7 +179,7 @@ max_temp_raster_crop %>%
 ```
 
 
-# EDA
+# Model Building 
 
 ## Satellite data
 ```{r}
@@ -408,6 +405,34 @@ p <- lasso_grid_coefs %>%
 
 plotly::ggplotly(p)
 ```
+
+```{r vif-tab}
+lm_fit <- stats::lm(formula = log(fire_count + 1) ~ . -id -year -month,
+                    data = model_df2)
+
+car::vif(lm_fit) %>% 
+  as_tibble(rownames = "variable") %>% 
+  rename(VIF = value) %>% 
+  # extract variables with highest VIF 
+  slice_max(VIF, 
+            n = 6) %>% 
+  kable(digits = 2,
+        caption = "Variables with largest Variance Inflation Factors(VIF)") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+While lasso regression is a good regularisation technique to sieve out important variables, it is inadequate for modelling in our scenario. This is mainly due to the structure of our variables. The climate variables are highly correlated as one might expect. For example, with high `daily_rain` we would expect a lower `max_temp` or a variable with its lag variables are expectedly highly correlated. These relations exist across many of our variables thus indicating high multicollinearity. 
+
+To demonstrate, we fit a linear model and computed the Variance Inflation Factor (VIF). The 6 variables with the highest VIF is shown in \@ref(tab:vif-tab). A general rule of thumb is that if VIF $> 10$ then multicollinearity is high (REF)[https://www.andreaperlato.com/mlpost/deal-multicollinearity-with-lasso-regression/]. Lasso's objective function provides unstable solutions in prescence of collinear features or features with very similar information. [REF](https://www.lexjansen.com/wuss/2018/131_Final_Paper_PDF.pdf).
+
+Therefore, due to the inherent interplay between the variables, lasso regression is not used for modelling. For the same reason, generalised linear models such as Poisson regression were ruled out.   
+
+# App (user-interface)
+
+## Current application
+
+
+
+ 
 
 
 # Conclusion 
