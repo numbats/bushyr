@@ -508,6 +508,161 @@ An issue with modelling the risk of bushfire based on environmental variable is 
 Based on our previous analysis, month is an important variable in determining the risk of fire as the risk of bushfire differs monthly. We use month as a factor variable in our model. The number of variables randomly sampled at each split (mtry) is chosen by using the caret package (citation). The random forest model fitted with 
 
 
+Random forest (Breiman, 2001) is a supervised learning technique that is constructing hundreds of regression trees by using ensemble learning, combined to a robust prediction model. It consists of a large number of decision trees, which are combined by taking the mean of the predicted y values as the prediction of all trees. A random forest model is built from a bootstrap sample of the data. Each tree at each parent node is constructed from p randomly selected predictors (https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0229509). The trees run in parallel without any interactions amongst them (https://levelup.gitconnected.com/random-forest-regression-209c0f354c84). Random forest is well suited for non-linear relationships, which is suitable for our case as the relationship between environmental variables and the fire risk is non-linear. In this case, we are using random forest for regression problem in where the splitting in each node is based on minnimising RSS.
+
+An issue with modelling the risk of bushfire based on environmental variable is the collinearity between variables. For example, relative humidity changes when temperature changes. An evidence of multicollinearity in our data can be seen in \@ref(fig:collinearity). Random forest model can handle multicollinearity problem well as it offers protection against the impact of collinearity between predictors (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4710485/)/. The reason for this is because random forest only considers a subset of predictors at each split, resulting to decorrelated trees. Even though multicollinearity is not a problem for the random forest algorithm itself, it might be a problem for the variable importance. Feature importance might be affected by multicollinearity as the importance of variables with high collinearity will be offset by each other. 
+
+```{r collinearity, fig.cap= "The figure shows the correlation matrix of the variables in our data. There are some variables in our data with high correlations, such as radiation has a really high correlation with et_short_crop (0.9)." }
+data_corr <- train %>%
+  ungroup() %>%
+  dplyr::select(-id, -year) 
+ggcorr(data_corr, label = T)
+```
+
+```{r}
+# creating a raster for victoria
+vic_raster <- raster(
+  # no. of rows & columns (directly linked to resolution of grid cell)
+  nrows = 20,
+  ncols = 20,
+  
+  # bbox (bounding box of Victoria)
+  xmn = 140.9617,
+  xmx = 149.9763,
+  ymn = -39.13396,
+  ymx = -33.99605,
+  
+  # crs
+  crs = "+proj=longlat +datum=WGS84"
+  )
+vic_raster[] <- 1:ncell(vic_raster)
+
+# creating the lon & lat for each cell id
+lonlat <- as.data.frame(coordinates(vic_raster)) %>%
+  mutate(id = as.factor(1:400))
+
+```
+
+-- describe about the splitting of data to test and train set --
+
+Based on our previous analysis, month is an important variable in determining the risk of fire as the risk of bushfire differs monthly. We treated month as a factor variable in our model. We fitted a random forest model with all the variables in our dataset as the explanatory variables. Our first random forest model is a model fitted using `ranger` (citation) without specifying the number of trees (ntree) and the number of variables used in each tree (mtry). The result is a random forest model by using 500 ntree and 5 mtry. This model has a mean of squared residuals of 2.19. Test MSE resulted from this model is 1.249 with an R-squared of 0.20, indicating that random forest is not a really good model for predicting bushfire risk in Victoria but it is better than a linear regression model. 
+
+```{r}
+train_final <- train %>% 
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-year) %>% mutate(month = as.factor(month))
+
+library(ranger)
+set.seed(2021)
+randomforest1 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity")
+```
+
+```{r}
+test2 <- test %>%
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-id, -year) %>%
+  mutate(month = as.factor(month))
+
+predicted <- predict(randomforest1, test2)$predictions
+
+# Function for evaluating model
+model_summary <- function(truth, estimate){
+  
+  df_new <- data.frame(truth = truth,
+                       estimate = estimate)
+  
+  data.frame(RMSE = rmse_vec(truth, estimate),
+             MAE = mae_vec(truth, estimate),
+             "R-Square" = rsq_vec(truth, estimate),
+             check.names = F
+             ) %>% 
+    mutate(MSE = sqrt(RMSE))
+}
+
+kable(model_summary(truth = test2$fire_count,
+           estimate = predicted))
+```
+
+```{r importance-rf, fig.cap= "Importance of the variables based on random forest model."}
+varimp <- data.frame(importance =randomforest1$variable.importance)
+df <- rownames_to_column(varimp, "var")
+ ggplot(df, aes(x=reorder(var,importance), y=importance,fill=importance))+ 
+      geom_bar(stat="identity", position="dodge")+ coord_flip()+
+      ylab("Variable Importance")+
+      xlab("")+
+      guides(fill=F)
+```
+
+## Features Selection
+
+We explored if only including the important variables would make the model better. Figure \@ref(fig:importance-rf) illustrates the importance of the variables in our data. However, as stated before, the variable importance on a random forest with multicollinearity in the data could not really be trusted. Therefore, we used `lime` (citation) to understand which variables contribute most to the prediction of bushfire risk. Local Interpretable Model-agnostic Explanation (LIME) can explain the predictions of a regression problem in an interpretable manner, which is done by learning an interpretable model locally around the prediction (https://algotech.netlify.app/blog/interpreting-black-box-regression-model-with-lime/). We split our data into data with high fire counts and data with low fire counts. Then, we sampled 4 observations from each data,  which will be passed to the `explain` function. 
+
+```{r}
+set.seed(2021)
+train3 <- train2 %>% dplyr::select(-fire_count)
+
+explainer <- lime(x = train3,
+                  model = rfmodel1) 
+
+# dealing with model_type error
+model_type.randomForest <- function(x){
+  return("regression") # for regression problem
+}
+
+predict_model.randomForest <- function(x, newdata, type = "response") {
+
+    # return prediction value
+    predict(x, newdata) %>% as.data.frame()
+    
+}
+
+# sampling data
+data_low <- train2 %>% filter(fire_count < 5)
+data_high <- train2 %>% filter(fire_count>5)
+
+set.seed(2021)
+lime_sample1 <- sample(1:length(data_low),4)
+lime_sample2 <- sample(1:length(data_high),4)
+
+data_selected1 <- data_low[lime_sample1, ]
+data_selected2 <- data_high[lime_sample2, ]
+data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
+  dplyr::select(-fire_count)
+
+# creating explanation
+explanation <- explain(x = data_selected,
+                       explainer = explainer, 
+                       feature_select = "auto",
+                       n_features = 15)
+
+explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
+explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
+```
+
+```{r plot-features, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the low fire counts."}
+plot_features(explanation1)
+```
+
+```{r plot-features2, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the high fire counts."}
+plot_features(explanation2)
+```
+
+Figure \@ref(fig:plot-features) illustrates the predictors which explain most of the fire risk prediction for the low fire counts with the x-axis showing the relative magnitude and direction of each predictors. While figure \@ref(fig:importance-rf2) shows those for the high fire counts. It can be seen that forest and month are really important in both cases, followed by surface soil moisture (s0_pct), wind speed (si10), and radiation. The top 15 features  are mostly the same for all the observations. We used these important features to fit a random forest model, however this new model has a higher mean of squared residuals. Hence, we decided to proceed with the random forest model with all of the variables. 
+
+## Parameters tuning
+To increase the accuracy of our model, we did paramaters tuning by using the `tuneRanger` package (citation) to find the best values of parameters for our model. Lowest error is achieved when mtry is equal to 8 and min.node.size equal to 3. We then fitted another random forest with these parameters and all of the predictors, which resulted to a 2.144 mean of squared error. After applying the model to the test set, we get a lower MSE (1.25) and a higher R-squared (0.204), indicating that the tuned model is slightly better than the previous model. 
+
+```{r}
+set.seed(2021)
+randomforest2 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity",num.threads=8,verbose=FALSE,mtry=8,min.node.size=3,num.trees=500,replace=FALSE)
+
+predicted2 <- predict(randomforest2, test2)$predictions
+
+kable(model_summary(truth = test2$fire_count,
+           estimate = predicted2))
+```
+
+
 **lasso regression**
 A lasso regresion was implemented to parse out the important variables. Depending on the penalty ($\lambda$) term imposed on the least square optimisation problem has the effect of shrinking (unimportnat) variables to zero/very small coefficient. When $\lambda = 0$, no parameters are elimated and the estimate equal to the one found in least squares. When $\lambda$ increases, more and more coefficients are set to 0 and eliminated. When $\lambda = \infty$, all coefficients are eliminated.
 
