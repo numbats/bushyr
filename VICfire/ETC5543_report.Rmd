@@ -428,11 +428,24 @@ Therefore, due to the inherent interplay between the variables, lasso regression
 
 # App (user-interface)
 
-## Current application
+This app is an extension to an previously made `RShiny` app (publicly available on [Department of Econometrics and Business Statistics, Monash University](https://ebsmonash.shinyapps.io/VICfire/). The intent of the previous app was to increase accessibility to the general public and fire department personnel run the clustering model to predict the risk of bushfire; given a fire occur. Our complementary goal (as per Research grant) is to develop risk models to visualise and monitor potential fire ignitions and track fires from statellite hotspots, in real time, for 2021-2022 Victorian bushfire season.   
+
+`RShiny` allows for elegant interactive exploratory plots and updates in real-time for swift decision making. It is also highly customisable to enhance users' interface. Furthermore, it supplies convenience function to assemble the html website in `R` and is easy to deploy. 
+
+The current project builds on the "Fire Risk" Tab. On top of the historical bushfire information and bushfire `cause` prediction, this complementary addition serves to inform users with historical information risk and up-to-date predictions around bushfire risk. We maintained a similar design for the strucutre of the app- keeping separate tabs for historical information and predictions. This is to cater for different users who might be using the app. Fire personnels might be interested in the weather and landscape variables setting the scene conducive fire environment. While users would be interested in bushfire predictions while planning a trip.   
+
+```{r app-hist-info, fig.cap="Bushfire Risk Information tab"}
+knitr::include_graphics("data/report/bushfire-risk-info.png")
+```
+
+The current state of the historical bushfire risk Information tab is shown above. in Figure \@ref(fig:app-hist-info). User interactivity include choosing the bushfire seasons to overlay ignition points. User can also choose the months to compute number of bushfires from. Upon clicking a grid cell, the data table and plots are produced. The table provides information of the different weather and landscape variables. Plots show the historically the number of bushfires and values of each variable (max temperature in this case). 
 
 
+```{r app-pred, fig.cap="rough plan for bushfire risk map"}
+knitr::include_graphics("data/report/shiny_plan.png")
+```
 
- 
+Additionally, a rough sketch of bushfire fire risk map is shown above (Figure \@ref(fig:app-pred). It incorporates the random forest model to make predictions of the bushfire risk in a particular cell in real time. Furthermore, the user will be able to toggle the various variables and make forecasts under different scenarios. A detail is that not all cells shown will increase the same amount but instead at a relative rate (by %) to account for the fact that different places have different weather conditions.  
 
 
 # Conclusion 
