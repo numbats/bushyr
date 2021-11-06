@@ -1,31 +1,34 @@
 ---
-title: "ETC5543_final_report"
+title: "Development of Bushfire risk prediction web app Victoria using open data"
 author: "Brenwin"
 date: "02/11/2021"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = TRUE)
 
 # --- load libraries
 library(tidyverse)
-library(GGally)
-library(randomForest)
-library(kableExtra)
-library(lime)
-library(raster)
-library(tidymodels)
-library(gridExtra)
+library(patchwork)
 library(tmap)
-library(lubridate)
+library(knitr)
+library(kableExtra)
+library(tidymodels)
 ```
 
 ```{r}
 # --- load relevant variables 
-load(here::here("VICfire/data/eda_report.Rdata"))
-load(here::here("VICfire/data/ida_report.Rdata"))
+load(here::here("data/eda_report.Rdata"))
+load(here::here("data/ida_report.Rdata"))
 ```
+
+1. Introduction & Motivation
+2. Data sources & processing
+3. Model Building
+4. App (user-interface)
+5. Summary & future work
+
 
 # Introduction and Motivation
     
@@ -47,9 +50,9 @@ This report condenses the research work on bushffire risk modelling done by Bren
 The resulting app seeks to improve accessibility to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change.
 
 
-# EDA
+# Data sources & processing
 
-## Map of Victoria
+**Map of Victoria**
 ```{r vic_grid, fig.cap="Victoria bounding box gridded 20 by 20"}
 # --- make tmaps interactive
 tmap::tmap_mode("view")
@@ -71,12 +74,11 @@ The following data analysis is based on the map of Victoria that is divided into
 
 
 
-# Data Sources 
 The data used for this project is the satellite hotspots data, which is collated with environmental variables data from SILO, ERA5, BoM, DELWP, and roads data (?).
 
-## Fire ignitions data
+**Fire ignitions data**
 
-### First respondent fire data (historical fire data) & Satellite data
+**First respondent fire data (historical fire data) & Satellite data**
 
     H
 We use the historical bushfire ignition locations and causes from the Victorian Department of Environment, Land, Water and Planning (DELWP) Fire Origins and compare it with the hotspot data from Himawari-8 to see which data is more accurate to be used in our modelling. This dataset provides the locations and causes of historical bushfire ignitions reported by the first respondent. These locations are recorded by crews rather than the exact origin of fire.
@@ -127,7 +129,7 @@ cluster_map_bf_season <- ignition_rasterize_cluster_bf_season %>%
 cluster_map_bf_season
 ```
 
-## Climate and landscape data
+**Climate and landscape data**
 
     H
 **ERA5 weather data**
@@ -201,72 +203,16 @@ There are four steps in the clustering algorithm. The first step is to slice the
 The clustering algorithm slices the data by its temporal dimension and splits the spatio-temporal clustering tasks into thousands spatial clustering tasks. The result of the clustering is a dataset consisting of four variables – unique identifier, longitude, latitude, and time. The final hotspot data used for this project consists of 2,917 observations from 2016 to 2021. 
 
 
-## Data integration
+**Data integration**
 – Talks about lagged variables bcs this might be important. The risk of fire happening might be affected by the average weather conditions for the two months or even a year. A hotter and drier year might result to more fires than –
 
-# Comparison of Hotspot and Historical Fire Data
+# Model Building
+
+**Comparison of Hotspot and Historical Fire Data**
 
     H
 As previously stated, historical fire data might not represent the accurate locations of the bushfire ignitions. Fire might start in a remote location which might be hard to visually access or monitor. Therefore, to choose which fire data to use for our modelling, we do comparisons on the historical fire data and the satellite data. The satellite data used here is the clustered satellite data.
-```{r}
-training <- read.csv(here::here("VICfire/data/training.csv"))
-  
-  training <- training %>%
-    filter(!CAUSE %in% c("BURNING BUILDING",
-                         "WASTE DISPOSAL, INDUSTRIAL, SAWMILL, TIP",
-                         "WASTE DISPOSAL, DOMESTIC",
-                         "BURNING VEHICLE, MACHINE",
-                         "BURNING BUILDING")) %>%
-    filter(new_cause != "other") %>%
-    filter(new_cause != "relight")
-  
-  
-  training <- dplyr::select(training, -c(EVENTID:FIRE_NUM), -id, -CAUSE, -FOREST, -FOR_CODE, -FOR_CAT)
-  
-  training <- mutate(training,
-                     year = factor(year(FIRE_START)),
-                     month = factor(month(FIRE_START), levels = c(10,11,12,1,2,3)),
-                     day = factor(day(FIRE_START), levels = c(1:31)),
-                     wod = factor(wday(FIRE_START), levels = c(1:7)))
-  
-  training <- filter(training, month %in% c(10,11,12,1,2,3))
-  
-  training <- na.omit(training)
-  
-  training <- mutate(training, new_cause = ifelse(new_cause == "accidental_human", "accident", new_cause)) %>%
-    mutate(new_cause = ifelse(new_cause == "burning_off_human", "burning_off", new_cause)) %>%
-    mutate(new_cause = factor(new_cause)) %>%
-    mutate(FOR_TYPE = factor(FOR_TYPE))
-  
-  training <- na.omit(training)
-  
-  training <- mutate(training,
-                     log_dist_cfa = log(dist_cfa),
-                     log_dist_camp = log(dist_camp),
-                     log_dist_road = log(dist_road),
-                     COVER = factor(COVER),
-                     HEIGHT = factor(HEIGHT))
-  
-  training <- rename(training, cause = new_cause)
-  training <- mutate(training,
-                     cause = fct_relevel(cause,
-                                         "lightning",
-                                         "accident",
-                                         "arson",
-                                         "burning_off"))
-  
-  training <- na.omit(training)
-  
-  training <- dplyr::select(training, -dist_road, -dist_cfa, -dist_camp, -FIRE_START)
-
-training2016 <- training %>%
-  filter((year == 2016 & month %in% c(10,11,12)) | (year == 2017 & month %in% c(1,2,3)))
-
-training2017 <- training %>%
-  filter((year == 2017 & month %in% c(10,11,12)) | (year == 2018 & month %in% c(1,2,3)))
-```
-
-```{r}
+```{r, echo = FALSE}
 # loading the clustered data
 hotspot2016_2018 <- read.csv(here::here("VICfire/data/clustering/predict_x_2016_2018.csv"))
 hotspot2019_2020 <- read.csv(here::here("VICfire/data/clustering/predict_x_2019_2020.csv"))
@@ -293,7 +239,9 @@ hotspot2019 <- hotspot2019_2020 %>%
 
 hotspot2020 <- hotspot2019_2020 %>%
   filter((year == 2020 & month %in% c(10,11,12)) | (year == 2021 & month %in% c(1,2,3)))
+```
 
+```{r, echo = FALSE}
 training2017_selected <- training2017 %>%
   dplyr::select(lon, lat, year, month) %>%
   mutate(type = "training")
@@ -308,7 +256,9 @@ hotspot2017_2$month <- as.factor(hotspot2017_2$month)
 
 joined_2017 <- training2017_selected %>%
   bind_rows(hotspot2017_2)
+```
 
+```{r}
 training2016 <- training2016 %>%
   mutate(period = "2016-2017")
 
@@ -338,7 +288,7 @@ joined_all <- training2016_2017 %>%
   bind_rows(hotspot2016_2017)
 ```
 
-```{r comparison-hist-hotspot, fig.cap= "The plot illustrates the comparison of the number of fires in the clustered hotspot data and the historical data."}
+```{r}
 #comparing distribution
 joined_all %>%
   count(month,year, type, period) %>%
@@ -346,11 +296,12 @@ joined_all %>%
   ggplot(aes(x = month,
              y = n)) +
   geom_bar(aes(fill = type), position = "dodge", stat = "identity") +
+  ggtitle("Comparison of historical vs satellite data") +
   facet_grid(~period) +
   ylab("Number of fires")
 ```
 
-Figure \@ref(fig:comparison-hist-hotspo) illustrates the comparison of the number of fires from the satellite data and the historical fire data for the period 2016-2017 and 2017-2018. There are more hotspot data for the period of 2016-2017 in January, February and March, and more historical data for October, November, and December. Meanwhile for period 2017-2018, the historical dataset has more observations overall except for March. One obvious insight here is that the number of observations is not consistent monthly, indicating that month is an important factor in determining the risk of fire. The number of bushfires in November and December from the satellite data is significantly lower compared to the historical data, which might be due to the filtering of fire power to only include big fires. 
+The above plot illustrates the comparison of the number of fires from the satellite data and the historical fire data for the period 2016-2017 and 2017-2018. There are more hotspot data for the period of 2016-2017 in January, February and March, and more historical data for October, November, and December. Meanwhile for period 2017-2018, the historical dataset has more observations overall except for March. One obvious insight here is that the number of observations is not consistent monthly, indicating that month is an important factor in determining the risk of fire. The number of bushfires in November and December from the satellite data is significantly lower compared to the historical data, which might be due to the filtering of fire power to only include big fires. 
 
 ```{r}
 # traaining data
@@ -369,13 +320,19 @@ x1[] <- 0
 tab1 <- table(cellFromXY(x1, training2017_2))
 
 x1[as.numeric(names(tab1))] <- tab1
+```
 
+
+
+```{r}
 # creating proportions
 df1 <- data.frame(coordinates(x1), count = x1[])
 df1 <- df1 %>% 
   mutate(prop2017 = count/947)  %>%
   dplyr::select(-count)
+```
 
+```{r}
 # clustered hotspot data
 hotspot2017_2 <- hotspot2017
 coordinates(hotspot2017_2) <- c("lon", "lat")
@@ -392,7 +349,9 @@ xh_2017[] <- 0
 tabh_2017 <- table(cellFromXY(xh_2017, hotspot2017_2))
 
 xh_2017[as.numeric(names(tabh_2017))] <- tabh_2017
+```
 
+```{r}
 # creating proportions
 dfh_2017 <- data.frame(coordinates(xh_2017), count = xh_2017[])
 dfh_2017 <- dfh_2017 %>% 
@@ -400,20 +359,21 @@ dfh_2017 <- dfh_2017 %>%
   dplyr::select(-count)
 ```
 
-We also look at the difference between the historical and satellite dataset per grid cell. Figure \@ref(fig:comparison-map) represents the number of fires in 2017-2018 period for historical (left) and satellite (right) data. We also compare the data for 2016-2017 and the insights we got are similar. There are a lot of fires in the historical data centered around CBD, indicating that there are more fires in areas where there are more people. Meanwhile, the satellite data shows that there are so little fires around the city center which might be due to the filtering of firepower. There are a lot of fires in remote areas which are not captured by the historical data, which might be due to these remote fires not being able to be monitored by people directly.  Satellite data, on the other hand, can capture these fires well. 
+We also look at the difference between the historical and satellite dataset per grid cell. The two maps below represent the number of fires in 2017-2018 period for historical (left) and satellite (right) data. We also compare the data for 2016-2017 and the insights we got are similar. There are a lot of fires in the historical data centered around CBD, indicating that there are more fires in areas where there are more people. Meanwhile, the satellite data shows that there are so little fires around the city center which might be due to the filtering of firepower. There are a lot of fires in remote areas which are not captured by the historical data, which might be due to these remote fires not being able to be monitored by people directly.  Satellite data, on the other hand, can capture these fires well. 
 
-```{r comparison-map, fig.cap="The map representation of the fire counts for the historical data (left) and the hotspot data (right) for 2016-2017."}
-par(mfrow=c(1,2))
+```{r}
+# with clustering
 plot(x1)
 points(training2017, pch = 20)
-
+```
+```{r}
 plot(xh_2017)
 points(hotspot2017_2, pch = 20)
 ```
 
-To account for the different number of fires each year, we created proportions of fire for each grid cell, which is calculated by dividing the number of fires in that cell for that year divided by the total fires in the year. The result is that there are some differences in the proportions for some cells as seen from figure \@ref(fig:). Some cells have higher proportions for the hotspot data while some others have higher proportions for historical data. Cells with higher proportions for historical data tend to be those areas closer to the city center in where there are a lot of people. On the other hand, cells with higher hotspot proportions are those areas which are more remote. 
+To account for the different number of fires each year, we created proportions of fire for each grid cell, which is calculated by dividing the number of fires in that cell for that year divided by the total fires in the year. The result is that there are some differences in the proportions for some cells as seen from the plot below. Some cells have higher proportions for the hotspot data while some others have higher proportions for historical data. Cells with higher proportions for historical data tend to be those areas closer to the city center in where there are a lot of people. On the other hand, cells with higher hotspot proportions are those areas which are more remote. 
 
-```{r proportions-comparison, fig.cap= "The figure shows a scatter plot of the proportions in the hotspot data vs the proportions in the historical data with each point represents the cell id."}
+```{r}
 #creating scatter plot
 df_joined_2017 <- df1 %>%
   left_join(dfh_2017, by = c("x", "y")) %>%
@@ -531,8 +491,6 @@ dplyr::inner_join(ignition_rasterize_training_sf_bf_season, ignition_rasterize_c
 ```
 
     
-    
-    
     Spatial distribution comparison 
 We also compared differences in the spatial distributions of ignitions in both the data sets by computing the difference in number of ignitions (points) contained within in cell i.e. historical ignitions - satellite ignitions per cell.
 
@@ -542,1029 +500,15 @@ The results is shown in the plot above. There is obvious differences in how the 
     Conclusion
 There are a few hypothesis pertaining to the inaccuracies of the historical data. Firstly, it is difficult to distinguish the number of fires one observes with the naked eye. For the same reason, it is less accurate and more subjective to gauge the location of a fire. Recording bushfires in this manner also prevents remote areas from being surveyed. Equally important is that we might also need to check the consistency of fire tower manning at each station. Another thing to note is that the number of bushfires is significantly lower from October to November, this could be due to filtering the clustered satellite data to include only bigger fires. 
 
-# Modelling
+**Modelling**
 The most common choice for bushfire risk modelling is the generalised additive model (GAM), which is used by Bates, McCaw, and Dowdy (2018) to predict the number of lightning ignitions in Western Australia. Simpler parametric models have also been used to predict the risk of bushfire, including multiple linear regression and generalized logistic regression.  The predictors used for these models are environmental variables like weather variables and vegetation types. *However, none of the models use hotspot data to predict the risk of bushfire. *? 
-We use models like linear regression model, random forest, and lasso regression model to predict the risk of bushfire in Victoria by using the hotspot data. Firstly, we fit a simple linear model to obtain a general insight of the data. We use all variables in the final dataset, which have been explained before, as our predictors. These variables are chosen based on our research about past bushfire risk modelling. This model provides some interesting insights with some predictors being not significant for the model. Average rainfall for that month has a positive correlation with the number of fires while average rainfall for the two months and three months have a negative correlation with the number of fires. Similar thing with maximum temperature, where average maximum temperature for the month and for the two months have a positive relationship with fire counts while average maximum temperature in three months has a negative relationship. This might be due to the non-linear relationship between environmental variables and fire counts. By fitting a linear model, we are assuming that the relationship between the predictors and the response is linear, when in reality it is not. As expected, the linear model has an adjusted R-squared of 0.1219. We also fitted a linear model with a log scale of fire_count, which makes it slightly better with a 0.1709 Adjusted R-squared. This indicates that only 17.09% variations in the data are explained by the model, thus a linear regression is not a good model for predicting the risk of bushfire.
+We use models like linear regression model, random forest, and lasso regression model to predict the risk of bushfire in Victoria by using the hotspot data. Firstly, we fit a simple linear model to obtain a general insight of the data. We use all variables in the final dataset, which have been explained before, as our predictors. These variables are chosen based on our research about past bushfire risk modelling. This model provides some interesting insights with some predictors being not significant for the model. Average rainfall for that month has a positive correlation with the number of fires while average rainfall for the two months and three months have a negative correlation with the number of fires. Similar thing with maximum temperature, where average maximum temperature for the month and for the two months have a positive relationship with fire counts while average maximum temperature in three months has a negative relationship. This might be due to the non-linear relationship between environmental variables and fire counts. By fitting a linear model, we are assuming that the relationship between the predictors and the response is linear, when in reality it is not. As expected, the linear model has an adjusted R-squared of 0.1452. This indicates that only 14.52% variations in the data are explained by the model, thus a linear regression is not a good model for predicting the risk of bushfire. 
+Random forest (Breiman, 2001) is a supervised learning technique that is constructing hundreds of regression trees by using ensemble learning, combined to a robust prediction model. It consists of a large number of decision trees, which are combined by taking the mean of the predicted y values as the prediction of all trees. A random forest model is built from a bootstrap sample of the data. Each tree at each parent node is constructed from p randomly selected predictors (https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0229509). The trees run in parallel without any interactions amongst them (https://levelup.gitconnected.com/random-forest-regression-209c0f354c84). Random forest is well suited for non-linear relationships, which is suitable for our case as the relationship between environmental variables and the fire risk is non-linear. 
+An issue with modelling the risk of bushfire based on environmental variable is the collinearity between variables. For example, relative humidity changes when temperature changes. Random forest model can handle multicollinearity problem well as it offers protection against the impact of collinearity between predictors (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4710485/)/. Even though multicollinearity is not a problem for the random forest algorithm itself, it might be a problem for the variable importance. Feature importance might be affected by multicollinearity as the importance of variables with high collinearity will be offset by each other. 
+Based on our previous analysis, month is an important variable in determining the risk of fire as the risk of bushfire differs monthly. We use month as a factor variable in our model. The number of variables randomly sampled at each split (mtry) is chosen by using the caret package (citation). The random forest model fitted with 
 
--- put on linear model output? --
 
-Random forest (Breiman, 2001) is a supervised learning technique that is constructing hundreds of regression trees by using ensemble learning, combined to a robust prediction model. It consists of a large number of decision trees, which are combined by taking the mean of the predicted y values as the prediction of all trees. A random forest model is built from a bootstrap sample of the data. Each tree at each parent node is constructed from p randomly selected predictors (https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0229509). The trees run in parallel without any interactions amongst them (https://levelup.gitconnected.com/random-forest-regression-209c0f354c84). Random forest is well suited for non-linear relationships, which is suitable for our case as the relationship between environmental variables and the fire risk is non-linear. In this case, we are using random forest for regression problem in where the splitting in each node is based on minnimising RSS.
-
-An issue with modelling the risk of bushfire based on environmental variable is the collinearity between variables. For example, relative humidity changes when temperature changes. An evidence of multicollinearity in our data can be seen in \@ref(fig:collinearity). Random forest model can handle multicollinearity problem well as it offers protection against the impact of collinearity between predictors (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4710485/)/. The reason for this is because random forest only considers a subset of predictors at each split, resulting to decorrelated trees. Even though multicollinearity is not a problem for the random forest algorithm itself, it might be a problem for the variable importance. Feature importance might be affected by multicollinearity as the importance of variables with high collinearity will be offset by each other. 
-
-```{r collinearity, fig.cap= "The figure shows the correlation matrix of the variables in our data. There are some variables in our data with high correlations, such as radiation has a really high correlation with et_short_crop (0.9)." }
-data_corr <- train %>%
-  ungroup() %>%
-  dplyr::select(-id, -year) 
-ggcorr(data_corr, label = T)
-```
-
-Based on our previous analysis, month is an important variable in determining the risk of fire as the risk of bushfire differs monthly. We treated month as a factor variable in our model. We fitted a random forest model with all the variables in our dataset as the explanatory variables. Our first random forest model is a model fitted using `randomForest` (citation) without specifying the number of trees (ntree) and the number of variables used in each tree (mtry). The result is a random forest model by using 500 ntree and 9 mtry. This model has a mean of squared residuals of 2.18886 and a 38.18% of variance explained. Test MSE resulted from this model is 1.226 with an R-squared of 0.25, indicating that random forest is not a really good model for predicting bushfire risk in Victoria but it is better than a linear regression model. 
-
-```{r}
-train2 <- train %>% 
-  ungroup() %>%
-  dplyr::select(-id, -year) %>% 
-  mutate(month = as.factor(month))
-
-set.seed(2021)
-rfmodel1 <- randomForest(fire_count ~ ., data = train2, importance = TRUE) 
-```
-
-```{r}
-test2 <- test %>%
-  dplyr::select(-id, -year) %>%
-  mutate(month = as.factor(month))
-
-predicted <- predict(rfmodel1, test2, type = "response")
-
-# Function for evaluating model
-model_summary <- function(truth, estimate){
-  
-  df_new <- data.frame(truth = truth,
-                       estimate = estimate)
-  
-  data.frame(RMSE = rmse_vec(truth, estimate),
-             MAE = mae_vec(truth, estimate),
-             "R-Square" = rsq_vec(truth, estimate),
-             check.names = F
-             ) %>% 
-    mutate(MSE = sqrt(RMSE))
-}
-
-kable(model_summary(truth = test2$fire_count,
-           estimate = predicted))
-```
-
-```{r importance-rf, fig.cap= "Importance of the variables based on random forest model."}
-varImpPlot(rfmodel1)
-```
-
-## Features Selection
-
-We explored if only including the important variables would make the model better. Figure \@ref(fig:importance-rf) illustrates the importance of the variables in our data. However, as stated before, the variable importance on a random forest with multicollinearity in the data could not really be trusted. Therefore, we used `lime` (citation) to understand which variables contribute most to the prediction of bushfire risk. Local Interpretable Model-agnostic Explanation (LIME) can explain the predictions of a regression problem in an interpretable manner, which is done by learning an interpretable model locally around the prediction (https://algotech.netlify.app/blog/interpreting-black-box-regression-model-with-lime/). We split our data into data with high fire counts and data with low fire counts. Then, we sampled 4 observations from each data,  which will be passed to the `explain` function. 
-
-```{r}
-set.seed(2021)
-train3 <- train2 %>% dplyr::select(-fire_count)
-
-explainer <- lime(x = train3,
-                  model = rfmodel1) 
-
-# dealing with model_type error
-model_type.randomForest <- function(x){
-  return("regression") # for regression problem
-}
-
-predict_model.randomForest <- function(x, newdata, type = "response") {
-
-    # return prediction value
-    predict(x, newdata) %>% as.data.frame()
-    
-}
-
-# sampling data
-data_low <- train2 %>% filter(fire_count < 5)
-data_high <- train2 %>% filter(fire_count>5)
-
-set.seed(2021)
-lime_sample1 <- sample(1:length(data_low),4)
-lime_sample2 <- sample(1:length(data_high),4)
-
-data_selected1 <- data_low[lime_sample1, ]
-data_selected2 <- data_high[lime_sample2, ]
-data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
-  dplyr::select(-fire_count)
-
-# creating explanation
-explanation <- explain(x = data_selected,
-                       explainer = explainer, 
-                       feature_select = "auto",
-                       n_features = 15)
-
-explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
-explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
-```
-
-```{r plot-features, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the low fire counts."}
-plot_features(explanation1)
-```
-
-```{r plot-features2, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the high fire counts."}
-plot_features(explanation2)
-```
-
-Figure \@ref(fig:plot-features) illustrates the predictors which explain most of the fire risk prediction for the low fire counts with the x-axis showing the relative magnitude and direction of each predictors. While figure \@ref(fig:importance-rf2) shows those for the high fire counts. It can be seen that forest and month are really important in both cases, followed by surface soil moisture (s0_pct), wind speed (si10), and radiation. The top 15 features  are mostly the same for all the observations. We used these important features to fit a random forest model, however this new model has a higher mean of squared residuals (2.21) and a lower variance explained (37.66%). Hence, we decided to proceed with the random forest model with all of the variables. 
-
-To increase the accuracy of our model, we did paramaters tuning by using the `tuneRF` function from `randomForest`. According to figure \@ref(fig:number-of-trees), the error stabilises around 100 trees but it keeps decreasing slowly until around 400 trees, with 447 trees giving the lowest MSE. We then used the `tuneRF` function to find the best mtry value. Lowest error is achieved when mtry is equal to 9, as shown in figure \@ref(fig:mtry-best), which results to 2.188197 OOB error. 
-
-```{r number-of-trees, fig.cap = "The figure shows the error with corresponding number of trees."}
-plot(rfmodel1)
-```
-
-```{r mtry-best, fig.cap = "The plot shows the error for each number of variables to be used per split.}
-x <- train2 %>% dplyr::select(-fire_count)
-
-set.seed(2021)
-mtry <- tuneRF(x, train2$fire_count, ntreeTry=447,
-               stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
-best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
-```
-
-We then fitted another random forest with these parameters and all of the predictors, which resulted to a 2.184916 mean of squared residuals and 38.29% of the variance explained by the model, which is slightly better than the previous models. 
-
-```{r}
-set.seed(2021)
-rfmodel3 <- randomForest(fire_count ~ ., data = train2, ntree = 447, mtry = 9, importance = TRUE) 
-```
- 
-Different cell id has different fire counts, indicating that id might be an important determinant for our risk prediction. Other than that, a lot of zero counts in the data makes the model to under-predicting the fire counts. We wanted to treat id as a factor in our model, however unfortunately random forest only allows up to 53 categories. To overcome this problem, we tried fitting an individual random forest model for each cell id. An issue with doing this is that there is not as much observations for the model, which might be an issue for the bootstrapping process of random forest as there are not much values to resample. Figure \@ref(fig:MSE-plot) compares the square of differences between the observed and predicted values for the general RF model and the individual RF model. Even though the MSE is lower for the general RF model, the distribution of the squared residuals is pretty similar for the two models, with some values being really high. This might be due to the huge amount of zeros in the data, which might affect the predictions for those with similar weather conditions but with a high fire counts. Figure \@ref(fig:residual-plot) shows the residual plots for the two models. 
-
-```{r MSE-plot, fig.cap = "The figure shows the comparison of the squared differences of the predicted and observed values for the general RF model (up) and the individual RF model (down).", warning = FALSE, message = FALSE}
-no_of_id <- unique(train$id)
-
-# making predictions
-# without log scale
-set.seed(2021)
-pred_values <- vector()
-for (i in 1:length(no_of_id)) {
-  data <- train %>% dplyr::select(-year) %>% filter(id == no_of_id[i])
-  rfmodel <-  randomForest(fire_count ~ .-id, data = data, importance = TRUE, mtry = 9, ntree = 447) 
-  predicted_values <- rfmodel$predicted 
-  for (j in 1:length(predicted_values)) {
-  pred_values <- append(pred_values, predicted_values[j])
-  }
-}
-pred_count <- as.data.frame(pred_values) 
-final_data <- train %>%
-  bind_cols(pred_count)
-         
-comparison <- final_data %>% 
-  dplyr::select(id, month, pred_values, fire_count)
-
-mse <- tibble(`Squared differences` = (comparison$fire_count - comparison$pred_values)^2)
-
-mse_rf2 <- ggplot(mse, aes(x = `Squared differences`)) +
-  geom_histogram(binwidth = 0.1) +
-  xlim(0, 50) +
-  ylim(0, 150) 
-
-rfmodel1_data <- train2 %>% mutate(pred = rfmodel1$predicted)
-
-mse1 <- tibble(`Squared differences` = (rfmodel1_data$fire_count - rfmodel1_data$pred)^2)
-
-mse_rf1 <- ggplot(mse1, aes(x =`Squared differences`)) +
-  geom_histogram(binwidth = 0.1) +
-  xlim(0, 50) +
-  ylim(0, 150)
-
-grid.arrange(mse_rf1, mse_rf2)
-```
-
- 
-```{r}
-kable(tibble(`MSE of general RF` = mean(mse1$`Squared differences`),
-       `MSE of individual RF` = mean(mse$`Squared differences`)))
-```
-
-```{r residual-plot, fig.cap= "Residual vs predicted values for the general random forest model (up) and individual random forest model (down)."}
-rf1_resid <- tibble(pred = rfmodel1$predicted,
-                    resid = rfmodel1_data$fire_count - rfmodel1_data$pred)
-residual_plot1 <- ggplot(rf1_resid, aes(x = pred, y = resid)) + geom_point()
-
-rf2_resid <- tibble(pred = comparison$pred_values,
-                    resid = comparison$fire_count - comparison$pred_values)
-residual_plot2 <- ggplot(rf2_resid, aes(x = pred, y = resid)) + geom_point()
-grid.arrange(residual_plot1, residual_plot2)
-```
-
-```{r}
-# creating a raster for victoria
-vic_raster <- raster(
-  # no. of rows & columns (directly linked to resolution of grid cell)
-  nrows = 20,
-  ncols = 20,
-  
-  # bbox (bounding box of Victoria)
-  xmn = 140.9617,
-  xmx = 149.9763,
-  ymn = -39.13396,
-  ymx = -33.99605,
-  
-  # crs
-  crs = "+proj=longlat +datum=WGS84"
-  )
-vic_raster[] <- 1:ncell(vic_raster)
-
-# creating the lon & lat for each cell id
-lonlat <- as.data.frame(coordinates(vic_raster)) %>%
-  mutate(id = as.factor(1:400))
-
-pred <- tibble(rfmodel1$predicted)
-data_pred <- train %>% 
-  bind_cols(pred) 
-
-mean_data <- data_pred %>%
-  group_by(id, month) %>%
-  summarise(pred_count = mean(`rfmodel1$predicted`),
-            count = mean(fire_count))
-
-mean_oct <- mean_data %>% filter(month == 10) %>%
- left_join(lonlat)
-
-mean_oct <- mean_oct %>%
-  ungroup() %>%
-  dplyr::select(-count,-id, -month)
-
-coordinates(mean_oct) = c("x", "y")
-mean_oct_raster <- rasterFromXYZ(mean_oct)
-
-pred_oct <- tm_shape(mean_oct_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "October")
-
-# actual data
-dataframe <- data.frame(id = as.factor(1:400)) 
-
-oct_data <- train %>%
-  filter(month == 10) %>%
-  group_by(id) %>%
-  summarise(count = mean(fire_count))
-
-oct_data <- dataframe %>%
-  left_join(oct_data) %>%
-  dplyr::select(id,count) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-oct_data <- oct_data %>% left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(oct_data) = c("x", "y")
-oct_raster_actual <- rasterFromXYZ(oct_data)
-
-actual_oct <- tm_shape(oct_raster_actual) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-mean_nov <- mean_data %>% filter(month == 11) %>%
- left_join(lonlat)
-mean_nov <- mean_nov %>%
-  ungroup() %>%
-  dplyr::select(-count,-id, -month)
-
-coordinates(mean_nov) = c("x", "y")
-mean_nov_raster <- rasterFromXYZ(mean_nov)
-
-pred_nov <- tm_shape(mean_nov_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "November")
-
-# actual data
-nov_data <- train %>%
-  filter(month == 11) %>%
-  group_by(id) %>%
-  summarise(count = mean(fire_count))
-
-nov_data <- dataframe %>%
-  left_join(nov_data) %>%
-  dplyr::select(id,count) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-nov_data <- nov_data %>% left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(nov_data) = c("x", "y")
-nov_raster_actual <- rasterFromXYZ(nov_data)
-
-actual_nov <- tm_shape(nov_raster_actual) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-mean_dec <- mean_data %>% filter(month == 12) %>%
- left_join(lonlat)
-mean_dec <- mean_dec %>%
-  ungroup() %>%
-  dplyr::select(-count,-id, -month)
-
-coordinates(mean_dec) = c("x", "y")
-mean_dec_raster <- rasterFromXYZ(mean_dec)
-
-pred_dec <- tm_shape(mean_dec_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "December")
-
-# actual data
-dec_data <- train %>%
-  filter(month == 12) %>%
-  group_by(id) %>%
-  summarise(count = mean(fire_count))
-
-dec_data <- dataframe %>%
-  left_join(dec_data) %>%
-  dplyr::select(id,count) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-dec_data <- dec_data %>% left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(dec_data) = c("x", "y")
-dec_raster_actual <- rasterFromXYZ(dec_data)
-
-actual_dec <- tm_shape(dec_raster_actual) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-mean_jan <- mean_data %>% filter(month == 1) %>%
- left_join(lonlat)
-mean_jan <- mean_jan %>%
-  ungroup() %>%
-  dplyr::select(-count,-id, -month)
-
-coordinates(mean_jan) = c("x", "y")
-mean_jan_raster <- rasterFromXYZ(mean_jan)
-
-pred_jan <- tm_shape(mean_jan_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "January")
-
-# actual data
-jan_data <- train %>%
-  filter(month == 1) %>%
-  group_by(id) %>%
-  summarise(count = mean(fire_count))
-
-jan_data <- dataframe %>%
-  left_join(jan_data) %>%
-  dplyr::select(id,count) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-jan_data <- jan_data %>% left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(jan_data) = c("x", "y")
-jan_raster_actual <- rasterFromXYZ(jan_data)
-
-actual_jan <- tm_shape(jan_raster_actual) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-mean_feb <- mean_data %>% filter(month == 2) %>%
- left_join(lonlat)
-mean_feb <- mean_feb %>%
-  ungroup() %>%
-  dplyr::select(-count,-id, -month)
-
-coordinates(mean_feb) = c("x", "y")
-mean_feb_raster <- rasterFromXYZ(mean_feb)
-
-pred_feb <- tm_shape(mean_feb_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "February")
-
-# actual data
-feb_data <- train %>%
-  filter(month == 2) %>%
-  group_by(id) %>%
-  summarise(count = mean(fire_count))
-
-feb_data <- dataframe %>%
-  left_join(feb_data) %>%
-  dplyr::select(id,count) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-feb_data <- feb_data %>% left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(feb_data) = c("x", "y")
-feb_raster_actual <- rasterFromXYZ(feb_data)
-
-actual_feb <- tm_shape(feb_raster_actual) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-mean_mar <- mean_data %>% filter(month == 3) %>%
- left_join(lonlat)
-mean_mar <- mean_mar %>%
-  ungroup() %>%
-  dplyr::select(-count,-id, -month)
-
-coordinates(mean_mar) = c("x", "y")
-mean_mar_raster <- rasterFromXYZ(mean_mar)
-
-pred_mar <- tm_shape(mean_mar_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "March")
-
-# actual data
-mar_data <- train %>%
-  filter(month == 3) %>%
-  group_by(id) %>%
-  summarise(count = mean(fire_count))
-
-mar_data <- dataframe %>%
-  left_join(mar_data) %>%
-  dplyr::select(id,count) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-mar_data <- mar_data %>% left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(mar_data) = c("x", "y")
-mar_raster_actual <- rasterFromXYZ(mar_data)
-
-actual_mar <- tm_shape(mar_raster_actual) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-```
-
-```{r map-rf1, fig.cap = "A map of the monthly fire counts of the actual vs the predicted values resulted from the general random forest model.", warning = FALSE, message = FALSE}
-tmap_arrange(pred_oct, actual_oct,
-             pred_nov, actual_nov,
-             pred_dec, actual_dec,
-             pred_jan, actual_jan,
-             pred_feb, actual_feb,
-             pred_mar, actual_mar)
-```
- 
-```{r}
-pred_oct_final <- final_data %>% 
-  dplyr::filter(month == 10) %>%
-  group_by(id) %>%
-  summarise(pred_risk = mean(pred_values))
-
-data_oct_final <- dataframe %>%
-  left_join(pred_oct_final) %>%
-  dplyr::select(id, pred_risk) %>%
-  mutate_all(~replace(., is.na(.), 0)) 
-
-data_oct_final <- data_oct_final %>% left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(data_oct_final) = c("x", "y")
-oct_raster <- rasterFromXYZ(data_oct_final)
-
-oct_pred2 <- tm_shape(oct_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "October")
-
-pred_nov_final <-final_data %>% 
-  dplyr::filter(month == 11) %>%
-  group_by(id) %>%
-  summarise(pred_risk = mean(pred_values))
-
-data_nov_final <- dataframe %>%
-  left_join(pred_nov_final) %>%
-  dplyr::select(id,pred_risk) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-data_nov_final <- data_nov_final %>% left_join(lonlat) %>% 
-   dplyr::select(-id)
-
-coordinates(data_nov_final) = c("x", "y")
-nov_raster <- rasterFromXYZ(data_nov_final)
-
-nov_pred2 <- tm_shape(nov_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "November")
-
-pred_dec_final <- final_data %>% 
-  dplyr::filter(month == 12) %>%
-  group_by(id) %>%
-  summarise(pred_risk = mean(pred_values))
-
-data_dec_final <- dataframe %>%
-  left_join(pred_dec_final) %>%
-  dplyr::select(id, pred_risk) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-data_dec_final <- data_dec_final %>% left_join(lonlat) %>% 
-   dplyr::select(-id)
-
-coordinates(data_dec_final) = c("x", "y")
-dec_raster <- rasterFromXYZ(data_dec_final)
-
-dec_pred2 <- tm_shape(dec_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title="December")
-
-pred_jan_final <- final_data %>% 
-  dplyr::filter(month == 1) %>%
-  group_by(id) %>%
-  summarise(pred_risk = mean(pred_values))
-
-data_jan_final <- dataframe %>%
-  left_join(pred_jan_final) %>%
-  dplyr::select(id, pred_risk) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-data_jan_final <- data_jan_final %>% left_join(lonlat) %>% 
-   dplyr::select(-id)
-
-coordinates(data_jan_final) = c("x", "y")
-jan_raster <- rasterFromXYZ(data_jan_final)
-
-jan_pred2 <- tm_shape(jan_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "January")
-
-pred_feb_final <- final_data %>% 
-  dplyr::filter(month == 2) %>%
-  group_by(id) %>%
-  summarise(pred_risk = mean(pred_values))
-
-data_feb_final <- dataframe %>%
-  left_join(pred_feb_final) %>%
-  dplyr::select(id, pred_risk) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-data_feb_final <- data_feb_final %>% left_join(lonlat) %>% 
-   dplyr::select(-id)
-
-coordinates(data_feb_final) = c("x", "y")
-feb_raster <- rasterFromXYZ(data_feb_final)
-
-feb_pred2 <- tm_shape(feb_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "February") 
-
-pred_mar_final <- final_data %>% 
-  dplyr::filter(month == 3) %>%
-  group_by(id) %>%
-  summarise(pred_risk = mean(pred_values))
-
-data_mar_final <- dataframe %>%
-  left_join(pred_mar_final) %>%
-  dplyr::select(id, pred_risk) %>%
-  mutate_all(~replace(., is.na(.), 0))
-
-data_mar_final <- data_mar_final %>% left_join(lonlat) %>% 
-   dplyr::select(-id)
-
-coordinates(data_mar_final) = c("x", "y")
-mar_raster <- rasterFromXYZ(data_mar_final)
-
-mar_pred2 <- tm_shape(mar_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "March",
-            legend.position = c("right", "top"))
-```
-
-```{r map-rf2, fig.cap = "A map of the monthly fire counts of the actual vs the predicted values resulted from the individual random forest model.", warning = FALSE, message = FALSE}
-tmap_arrange(oct_pred2, actual_oct,
-             nov_pred2, actual_nov,
-             dec_pred2, actual_dec,
-             jan_pred2, actual_jan,
-             feb_pred2, actual_feb,
-             mar_pred2, actual_mar)
-```
-
-Figure \@ref(fig:map-rf1) presents the comparison between the predicted counts and the actual fire counts for the general random forest model while figure \@ref(fig:map-rf2) shows those for the individual random forest model. One clear thing to notice here is that the general random forest model tends to underpredict the fire counts for all the months, while the individual random forest tends to overpredict for October, November and February. The individual random forest model gives a pretty accurate predictions for January.  
-
-```{r}
-train4 <- train %>% dplyr::select(-year)
-
-# predict function
-predicting <- function(train_data, test_data) {
-  no_of_id2 <- unique(test_data$id)
-  
-  no_of_id <- unique(train_data$id)
-  
-  final_predicted <- c()
-  for (i in 1:length(no_of_id2)) {
-    
-   data2 <- train_data %>% filter(id == no_of_id[i]) %>% mutate(month = as.factor(month))
-   
-   test_data2 <- test_data %>% filter(id == no_of_id[i])
-   
-   rfmodel <-  randomForest(fire_count ~ .-id, data = data2, importance = TRUE, mtry = 9, ntree = 447) 
-   
-   predicted_values <- predict(rfmodel, test_data2)
-   
-   pred_data <- test_data2 %>% mutate(pred = predicted_values)
-   
-   final_predicted <- final_predicted %>% bind_rows(pred_data)
-  }
-  
-  final_predicted
-}
-
-predicted_test <- predicting(train4, test2)
-
-# predicting
-predicted2 <- predicted_test$pred
-
-kable(model_summary(truth = predicted_test$fire_count,
-           estimate = predicted2))
-```
-
-Comparing with the general random forest model, the individual random forest model provides a better predictions shown by the lower MSE and the higher R-squared for the test set. We also created a visual representation of the predicted vs actual fire counts for the test set.
-
-```{r}
-test_actual_oct
-```
-
-
-```{r}
-predicted_test_data <- tibble(pred = predicted2) %>%
-  bind_cols(test2)
-
-test_oct <- test2 %>% filter(month == 10) %>%
- left_join(lonlat) %>%
-  ungroup() %>%
-  dplyr::select(x,y,fire_count)
-
-coordinates(test_oct) = c("x", "y")
-test_oct_raster <- rasterFromXYZ(test_oct)
-
-test_actual_oct <- tm_shape(test_oct_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "October")
-
-# pred data
-test_oct_pred <- predicted_test_data %>%
-  filter(month == 10) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_oct_pred) = c("x", "y")
-pred_oct_test_raster <- rasterFromXYZ(test_oct_pred)
-
-test_pred_oct <- tm_shape(pred_oct_test_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-
-# for nov
-test_nov <- test2 %>% filter(month == 11) %>%
- left_join(lonlat) %>%
-  ungroup() %>%
-  dplyr::select(x,y,fire_count)
-
-coordinates(test_nov) = c("x", "y")
-test_nov_raster <- rasterFromXYZ(test_nov)
-
-test_actual_nov <- tm_shape(test_nov_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "November")
-
-# pred data
-test_nov_pred <- predicted_test_data %>%
-  filter(month == 11) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_nov_pred) = c("x", "y")
-pred_nov_test_raster <- rasterFromXYZ(test_nov_pred)
-
-test_pred_nov <- tm_shape(pred_nov_test_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-# for dec
-test_dec <- test2 %>% filter(month == 12) %>%
- left_join(lonlat) %>%
-  ungroup() %>%
-  dplyr::select(x,y,fire_count)
-
-coordinates(test_dec) = c("x", "y")
-test_dec_raster <- rasterFromXYZ(test_dec)
-
-test_actual_dec <- tm_shape(test_dec_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "December")
-
-# pred data
-test_dec_pred <- predicted_test_data %>%
-  filter(month == 12) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_dec_pred) = c("x", "y")
-pred_dec_test_raster <- rasterFromXYZ(test_dec_pred)
-
-test_pred_dec <- tm_shape(pred_dec_test_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-# for jan
-test_jan <- test2 %>% filter(month == 1) %>%
- left_join(lonlat) %>%
-  ungroup() %>%
-  dplyr::select(x,y,fire_count)
-
-coordinates(test_jan) = c("x", "y")
-test_jan_raster <- rasterFromXYZ(test_jan)
-
-test_actual_jan <- tm_shape(test_jan_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "January")
-
-# pred data
-test_jan_pred <- predicted_test_data %>%
-  filter(month == 1) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_jan_pred) = c("x", "y")
-pred_jan_test_raster <- rasterFromXYZ(test_jan_pred)
-
-test_pred_jan <- tm_shape(pred_jan_test_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-# for feb
-test_feb <- test2 %>% filter(month ==2) %>%
- left_join(lonlat) %>%
-  ungroup() %>%
-  dplyr::select(x,y,fire_count)
-
-coordinates(test_feb) = c("x", "y")
-test_feb_raster <- rasterFromXYZ(test_feb)
-
-test_actual_feb <- tm_shape(test_feb_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "February")
-
-# pred data
-test_feb_pred <- predicted_test_data %>%
-  filter(month == 2) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_feb_pred) = c("x", "y")
-pred_feb_test_raster <- rasterFromXYZ(test_feb_pred)
-
-test_pred_feb <- tm_shape(pred_feb_test_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-# for march
-test_mar <- test2 %>% filter(month == 3) %>%
- left_join(lonlat) %>%
-  ungroup() %>%
-  dplyr::select(x,y,fire_count)
-
-coordinates(test_mar) = c("x", "y")
-test_mar_raster <- rasterFromXYZ(test_mar)
-
-test_actual_mar <- tm_shape(test_mar_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3) +
-  tm_layout(title = "March")
-
-# pred data
-test_mar_pred <- predicted_test_data %>%
-  filter(month == 3) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_mar_pred) = c("x", "y")
-pred_mar_test_raster <- rasterFromXYZ(test_mar_pred)
-
-test_pred_mar <- tm_shape(pred_mar_test_raster) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-```
-
-```{r map-rf-test2, fig.cap = "A map of the monthly fire counts of the actual vs the predicted values resulted from the cell-specific random forest model for the test set.", warning = FALSE, message = FALSE}
-tmap_arrange( test_actual_oct, test_pred_oct,
-              test_actual_nov, test_pred_nov,
-              test_actual_dec, test_pred_dec,
-              test_actual_jan, test_pred_jan,
-              test_actual_feb, test_pred_feb,
-              test_actual_mar, test_pred_mar)
-```
-```{r}
-predicted_test_data2 <- tibble(pred = predicted) %>%
-  bind_cols(test2)
-
-# pred data
-test_oct_pred2 <- predicted_test_data2 %>%
-  filter(month == 10) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_oct_pred2) = c("x", "y")
-pred_oct_test_raster2 <- rasterFromXYZ(test_oct_pred2)
-
-test_pred_oct2 <- tm_shape(pred_oct_test_raster2) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-# pred data
-test_nov_pred2 <- predicted_test_data2 %>%
-  filter(month == 11) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_nov_pred2) = c("x", "y")
-pred_nov_test_raster2 <- rasterFromXYZ(test_nov_pred2)
-
-test_pred_nov2 <- tm_shape(pred_nov_test_raster2) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-# pred data
-test_dec_pred2 <- predicted_test_data2 %>%
-  filter(month == 12) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_dec_pred2) = c("x", "y")
-pred_dec_test_raster2 <- rasterFromXYZ(test_dec_pred2)
-
-test_pred_dec2 <- tm_shape(pred_dec_test_raster2) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-# pred data
-test_jan_pred2 <- predicted_test_data2 %>%
-  filter(month == 1) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_jan_pred2) = c("x", "y")
-pred_jan_test_raster2 <- rasterFromXYZ(test_jan_pred2)
-
-test_pred_jan2 <- tm_shape(pred_jan_test_raster2) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-# pred data
-test_feb_pred2 <- predicted_test_data2 %>%
-  filter(month == 2) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_feb_pred2) = c("x", "y")
-pred_feb_test_raster2 <- rasterFromXYZ(test_feb_pred2)
-
-test_pred_feb2 <- tm_shape(pred_feb_test_raster2) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-
-# pred data
-test_mar_pred2 <- predicted_test_data2 %>%
-  filter(month == 3) %>%
-  dplyr::select(id,pred) %>%
-  left_join(lonlat) %>%
-   dplyr::select(-id)
-
-coordinates(test_mar_pred2) = c("x", "y")
-pred_mar_test_raster2 <- rasterFromXYZ(test_mar_pred2)
-
-test_pred_mar2 <- tm_shape(pred_mar_test_raster2) +
-  tm_raster(style = "cont", 
-            palette = "seq",
-                  alpha = 0.4) +
-  tm_shape(vic_map_sf) +
-  tmap::tm_borders(lwd = 3)
-```
-
-```{r map-rf-test, fig.cap = "A map of the monthly fire counts of the actual vs the predicted values resulted from the general random forest model for the test set.", warning = FALSE, message = FALSE}
-tmap_arrange( test_actual_oct, test_pred_oct,
-              test_actual_nov, test_pred_nov,
-              test_actual_dec, test_pred_dec,
-              test_actual_jan, test_pred_jan,
-              test_actual_feb, test_pred_feb,
-              test_actual_mar, test_pred_mar)
-```
-
-
-## lasso regression 
+**lasso regression**
 A lasso regresion was implemented to parse out the important variables. Depending on the penalty ($\lambda$) term imposed on the least square optimisation problem has the effect of shrinking (unimportnat) variables to zero/very small coefficient. When $\lambda = 0$, no parameters are elimated and the estimate equal to the one found in least squares. When $\lambda$ increases, more and more coefficients are set to 0 and eliminated. When $\lambda = \infty$, all coefficients are eliminated.
 
 To choose a suitable $\lambda$ value, 5-fold cross validation is applied. Using a $\lambda$ grid consisting of 50 levels from 0 to 10 which is the default for `tune::penalty()`. For each cross-validation fold, the regularised lasso regression model is fitted and $R^2$ and $RMSE$ was recorded. The results is shown in Figure \@ref(fig:lasso-metric) *note results are on log10 scale. The $lambda$ value that minimises the RMSE was chosen which is found to be $1.0001$. 
@@ -1633,10 +577,44 @@ p <- lasso_grid_coefs %>%
 plotly::ggplotly(p)
 ```
 
+```{r vif-tab}
+lm_fit <- stats::lm(formula = log(fire_count + 1) ~ . -id -year -month,
+                    data = model_df2)
+
+car::vif(lm_fit) %>% 
+  as_tibble(rownames = "variable") %>% 
+  rename(VIF = value) %>% 
+  # extract variables with highest VIF 
+  slice_max(VIF, 
+            n = 6) %>% 
+  kable(digits = 2,
+        caption = "Variables with largest Variance Inflation Factors(VIF)") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+While lasso regression is a good regularisation technique to sieve out important variables, it is inadequate for modelling in our scenario. This is mainly due to the structure of our variables. The climate variables are highly correlated as one might expect. For example, with high `daily_rain` we would expect a lower `max_temp` or a variable with its lag variables are expectedly highly correlated. These relations exist across many of our variables thus indicating high multicollinearity. 
+
+To demonstrate, we fit a linear model and computed the Variance Inflation Factor (VIF). The 6 variables with the highest VIF is shown in \@ref(tab:vif-tab). A general rule of thumb is that if VIF $> 10$ then multicollinearity is high (REF)[https://www.andreaperlato.com/mlpost/deal-multicollinearity-with-lasso-regression/]. Lasso's objective function provides unstable solutions in prescence of collinear features or features with very similar information. [REF](https://www.lexjansen.com/wuss/2018/131_Final_Paper_PDF.pdf).
+
+Therefore, due to the inherent interplay between the variables, lasso regression is not used for modelling. For the same reason, generalised linear models attempted such as Poisson regression were ruled out.
+
+# App (user-interface)
+This app is an extension to an previously made `RShiny` app (publicly available on [Department of Econometrics and Business Statistics, Monash University](https://ebsmonash.shinyapps.io/VICfire/). The intent of the previous app was to increase accessibility to the general public and fire department personnel run the clustering model to predict the risk of bushfire; given a fire occur. Our complementary goal (as per Research grant) is to develop risk models to visualise and monitor potential fire ignitions and track fires from satellite hotspots, in real time, for 2021-2022 Victorian bushfire season.   
+
+`RShiny` allows for elegant interactive exploratory plots and updates in real-time for swift decision making. It is also highly customisable to enhance users' interface. Furthermore, it supplies convenience function to assemble the html website in `R` and is easy to deploy. 
+
+The current project builds on the "Fire Risk" Tab. On top of the historical bushfire information and bushfire `cause` prediction, this complementary addition serves to inform users with historical information risk and up-to-date predictions around bushfire risk. We maintained a similar design for the strucutre of the app- keeping separate tabs for historical information and predictions. This is to cater for different users who might be using the app. Fire personnels might be interested in the weather and landscape variables setting the scene conducive fire environment. While users would be interested in bushfire predictions while planning a trip.   
+
+```{r app-hist-info, fig.cap="Bushfire Risk Information tab"}
+knitr::include_graphics("data/report/bushfire-risk-info.png")
+```
+
+The current state of the historical bushfire risk Information tab is shown above. in Figure \@ref(fig:app-hist-info). User interactivity include choosing the bushfire seasons to overlay ignition points. User can also choose the months to compute number of bushfires from. Upon clicking a grid cell, the data table and plots are produced. The table provides information of the different weather and landscape variables. Plots show the historically the number of bushfires and values of each variable (max temperature in this case). 
 
 
+```{r app-pred, fig.cap="rough plan for bushfire risk map"}
+knitr::include_graphics("data/report/shiny_plan.png")
+```
 
-
-
-
+Additionally, a rough sketch of bushfire fire risk map in the app is shown above (Figure \@ref(fig:app-pred). It incorporates the random forest model to make predictions of the bushfire risk in a particular cell in real time. Furthermore, the user will be able to toggle the various variables and make forecasts under different scenarios. A detail is that not all cells shown will increase the same amount but instead at a relative rate (by %) to account for the fact that different places have different weather conditions.  
 
