@@ -65,8 +65,6 @@ as(vic_raster_crop_values_join$id, "SpatialPolygonsDataFrame") %>% # random rast
 
 The following data analysis is based on the map of Victoria that is divided into 20x20 cells (shown above). Note that only cells within Victoria were considered. Our study also only focuses on bushfire seasons where most fire ignitions happen which is from October through to March and data from 2016 to 2021. 
 
-
-
 The data used for this project is the satellite hotspots data, which is collated with environmental variables data from SILO, ERA5, BoM, DELWP, and roads data (?).
 
 **Fire ignitions data**
