@@ -40,7 +40,7 @@ Even though bushfires cannot be avoided naturally, their consequences can be min
 
 This work will focus on Victoria. Victoria is one of the most fire-prone region in the world, given its fire conducive weather and fuel conditions. Fire ignitions are most commonly caused naturally by lightning or can also be man-made such as through planned burning off, accidents or arson. This report condenses the research work on bushffire risk modelling done by Brenwin Ang and Helen Evangelina as part of their internship for ETC5543 Business Analytics Creative Activity coursework. An extension to the work done by Di Cook, Emily Dodwell and Patrick Li on hotspot clustering algorithm. It is based on Patrick Li’s thesis titled “Using Remote Sensing Data to Understand Fire Ignitions in Victoria during the 2019-2020 Australian Bushfire Season” [@patricksthesis]. Weather is considered a determinant for forest fires. Therefore, we will be using environmental variables such as temperature, relative humidity, wind speed, radiation, drought index, etc in our modelling as the predictors. We will be testing if these variables are significant for predicting the risk of bushfire in Victoria. 
 
-Fire risk is defined as the likelihood of a fire occurring, multiplied by the severity of the fire (Merton Council, 2013). However, in this case, we will be defining fire risk as only the likelihood of fire occurring. The overall objective of this work is to develop a web app by using shiny to monitor potential fire ignitions by developing fire risk models for the 2021-2022 Victorian bushfire season based on environmental variables in where users would be able to input the values of the environmental variables which would change the risk predictions. The resulting app seeks to improve accessibility to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change. The github repository including Patrick’s thesis can be found [here](https://github.com/numbats/bushyr).
+Fire risk is defined as the likelihood of a fire occurring, multiplied by the severity of the fire [@merton]. However, in this case, we will be defining fire risk as only the likelihood of fire occurring. The overall objective of this work is to develop a web app by using shiny to monitor potential fire ignitions by developing fire risk models for the 2021-2022 Victorian bushfire season based on environmental variables in where users would be able to input the values of the environmental variables which would change the risk predictions. The resulting app seeks to improve accessibility to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change. The github repository including Patrick’s thesis can be found [here](https://github.com/numbats/bushyr).
 
 
 # Data sources & processing
@@ -296,7 +296,7 @@ dplyr::inner_join(ignition_rasterize_training_sf_bf_season, ignition_rasterize_c
   tmap::tm_basemap(leaflet::providers$OpenStreetMap)
 ```
 
-We also compared differences in the spatial distributions of ignitions in both the data sets by computing the difference in number of ignitions (points) contained within in cell i.e. historical ignitions - satellite ignitions per cell. From figure \@ref(fig:comparison-map), there is obvious difference in how the fire ignitions are scattered around the map. Positive values indicate that there are more historical data and the other way around. Historical data is more concentrated in the map while satellite data tend to be more scattered. There is also strikingly more observations near Melbourne CBD for historical data sets, indicating that there are more fires in areas where there are more people. Meanwhile, the satellite data shows that there are so little fires around the city center which might be due to the filtering of firepower. There are a lot of fires in remote areas which are not captured by the historical data, which might be due to these remote fires not being able to be monitored by people directly.  Satellite data, on the other hand, can capture these fires well. Moreover, zooming in, we observe that most of ignitions observed in the historical data are highly accessible by road while places where there is a much larger number for satellite data are in the remote areas. This speaks to the fact that most ignitions are caused by lightning (https://theconversation.com/open-data-shows-lightning-not-arson-was-the-likely-cause-of-most-victorian-bushfires-last-summer-151912).
+We also compared differences in the spatial distributions of ignitions in both the data sets by computing the difference in number of ignitions (points) contained within in cell i.e. historical ignitions - satellite ignitions per cell. From figure \@ref(fig:comparison-map), there is obvious difference in how the fire ignitions are scattered around the map. Positive values indicate that there are more historical data and the other way around. Historical data is more concentrated in the map while satellite data tend to be more scattered. There is also strikingly more observations near Melbourne CBD for historical data sets, indicating that there are more fires in areas where there are more people. Meanwhile, the satellite data shows that there are so little fires around the city center which might be due to the filtering of firepower. There are a lot of fires in remote areas which are not captured by the historical data, which might be due to these remote fires not being able to be monitored by people directly.  Satellite data, on the other hand, can capture these fires well. Moreover, zooming in, we observe that most of ignitions observed in the historical data are highly accessible by road while places where there is a much larger number for satellite data are in the remote areas. This speaks to the fact that most ignitions are caused by lightning [@lightning].
 
 To account for the different number of fires each year, we created proportions of fire for each grid cell, which is calculated by dividing the number of fires in that cell for that year divided by the total fires in the year. The result is that there are some differences in the proportions for some cells as seen from figure \@ref(fig:proportions-comparison). Some cells have higher proportions for the hotspot data while some others have higher proportions for historical data. Cells with higher proportions for historical data tend to be those areas closer to the city center in where there are a lot of people. On the other hand, cells with higher hotspot proportions are those areas which are more remote. 
 
@@ -321,153 +321,8 @@ For the purpose of modelling, we split the data into training and test set. The 
 
 We use models like linear regression model, random forest, and lasso regression model to predict the risk of bushfire in Victoria by using the hotspot data. Firstly, we fit a simple linear model to obtain a general insight of the data. We use all variables in the final dataset, which have been explained before, as our predictors. These variables are chosen based on our research about past bushfire risk modelling. This model provides some interesting insights with some predictors being not significant for the model. Average rainfall for that month has a positive correlation with the number of fires while average rainfall for the two months and three months have a negative correlation with the number of fires. Similar thing with maximum temperature, where average maximum temperature for the month and for the two months have a positive relationship with fire counts while average maximum temperature in three months has a negative relationship. This might be due to the non-linear relationship between environmental variables and fire counts. By fitting a linear model, we are assuming that the relationship between the predictors and the response is linear, when in reality it is not. As expected, the linear model has an adjusted R-squared of 0.1219. We also fitted a linear model with a log scale of fire_count, which makes it slightly better with a 0.1709 Adjusted R-squared. This indicates that only 17.09% variations in the data are explained by the model, thus a linear regression is not a good model for predicting the risk of bushfire.
 
-Random forest (Breiman, 2001) is a supervised learning technique that is constructing hundreds of regression trees by using ensemble learning, combined to a robust prediction model. It consists of a large number of decision trees, which are combined by taking the mean of the predicted y values as the prediction of all trees. A random forest model is built from a bootstrap sample of the data. Each tree at each parent node is constructed from p randomly selected predictors (Matsuki et al., 2016). The trees run in parallel without any interactions amongst them (Bakshi, 2020). Random forest is well suited for non-linear relationships, which is suitable for our case as the relationship between environmental variables and the fire risk is non-linear. In this case, we are using random forest for regression problem in where the splitting in each node is based on minnimising RSS.
-
-An issue with modelling the risk of bushfire based on environmental variable is the collinearity between variables. For example, relative humidity changes when temperature changes. An evidence of multicollinearity in our data can be seen in \@ref(fig:collinearity). Random forest model can handle multicollinearity problem well as it offers protection against the impact of collinearity between predictors (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4710485/). The reason for this is because random forest only considers a subset of predictors at each split, resulting to decorrelated trees. Even though multicollinearity is not a problem for the random forest algorithm itself, it might be a problem for the variable importance. Feature importance might be affected by multicollinearity as the importance of variables with high collinearity will be offset by each other. 
-
-```{r collinearity, fig.cap= "The figure shows the correlation matrix of the variables in our data. There are some variables in our data with high correlations, such as radiation has a really high correlation with et_short_crop (0.9)." }
-data_corr <- train %>%
-  ungroup() %>%
-  dplyr::select(-id, -year) 
-ggcorr(data_corr, label = T)
-```
-
-Based on our previous analysis, month is an important variable in determining the risk of fire as the risk of bushfire differs monthly. We treated month as a factor variable in our model. We fitted a random forest model with all the variables in our dataset as the explanatory variables. Our first random forest model is a model fitted using `ranger` (**citation**) without specifying the number of trees (ntree) and the number of variables used in each tree (mtry). The result is a random forest model by using 500 ntree and 5 mtry. This model has a mean of squared residuals of 1.216 and R-squared of 0.396. Test MSE resulted from this model is 1.242 with an R-squared of 0.22, indicating that random forest is better than a linear regression model. Summary statistics of the test set on the random forest model is on \@ref(tab:test-summary).
-
-```{r}
-train_final <- train %>% 
-  left_join(lonlat, by = "id") %>%
-  dplyr::select(-year) %>% mutate(month = as.factor(month))
-
-set.seed(2021)
-randomforest1 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity")
-```
-
-```{r test-summary, fig.cap="Summary statistics of the random forest model on test set."}
-test2 <- test %>%
-  left_join(lonlat, by = "id") %>%
-  dplyr::select(-id, -year) %>%
-  mutate(month = as.factor(month))
-
-predicted <- predict(randomforest1, test2)$predictions
-
-# Function for evaluating model
-model_summary <- function(truth, estimate){
-  
-  df_new <- data.frame(truth = truth,
-                       estimate = estimate)
-  
-  data.frame(RMSE = rmse_vec(truth, estimate),
-             MAE = mae_vec(truth, estimate),
-             "R-Square" = rsq_vec(truth, estimate),
-             check.names = F
-             ) %>% 
-    mutate(MSE = sqrt(RMSE))
-}
-
-kable(model_summary(truth = test2$fire_count,
-           estimate = predicted))
-```
-
-## Features Selection
-
-We explored if only including the important variables would make the model better. As stated before, the variable importance on a random forest with multicollinearity in the data could not really be trusted. Therefore, we used `lime` (citation) to understand which variables contribute most to the prediction of bushfire risk. Local Interpretable Model-agnostic Explanation (LIME) can explain the predictions of a regression problem in an interpretable manner, which is done by learning an interpretable model locally around the prediction (https://algotech.netlify.app/blog/interpreting-black-box-regression-model-with-lime/). We split our data into data with high fire counts and data with low fire counts. Then, we sampled 4 observations from each data,  which will be passed to the `explain` function. 
-
-
-```{r}
-set.seed(2021)
-train2 <- train_final %>% dplyr::select(-fire_count)
-
-explainer <- lime(x = train2,
-                  model = randomforest1) 
-
-# dealing with model_type error
-model_type.randomForest <- function(x){
-  return("regression") # for regression problem
-}
-
-predict_model.randomForest <- function(x, newdata, type = "response") {
-
-    # return prediction value
-    predict(x, newdata) %>% as.data.frame()
-    
-}
-
-# sampling data
-data_low <- train_final %>% filter(fire_count < 5)
-data_high <- train_final %>% filter(fire_count>5)
-
-set.seed(2021)
-lime_sample1 <- sample(1:length(data_low),4)
-lime_sample2 <- sample(1:length(data_high),4)
-
-data_selected1 <- data_low[lime_sample1, ]
-data_selected2 <- data_high[lime_sample2, ]
-data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
-  dplyr::select(-fire_count)
-
-# creating explanation
-explanation <- explain(x = data_selected,
-                       explainer = explainer, 
-                       feature_select = "auto",
-                       n_features = 15)
-
-explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
-explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
-```
-
-```{r plot-features, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the low fire counts."}
-plot_features(explanation1)
-```
-
-```{r plot-features2, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the high fire counts."}
-plot_features(explanation2)
-```
-
-Figure \@ref(fig:plot-features) illustrates the predictors which explain most of the fire risk prediction for the low fire counts with the x-axis showing the relative magnitude and direction of each predictors. While figure \@ref(fig:importance-rf2) shows those for the high fire counts. It can be seen that forest and month are really important in both cases, followed by surface soil moisture (s0_pct), wind speed (si10), and radiation. The top 15 features  are mostly the same for all the observations. We used these important features to fit a random forest model, however this new model has a higher mean of squared residuals. Hence, we decided to proceed with the random forest model with all of the variables. 
-
-## Parameters tuning
-To increase the accuracy of our model, we did paramaters tuning by using the `tuneRanger` package (citation) to find the best values of parameters for our model. Lowest error is achieved when mtry is equal to 8 and ntree equal to 500. We then fitted another random forest with these parameters and all of the predictors, which resulted to a 1.212 mean of squared error and R-squared of 0.399, which is slightly better than the previous model. After applying the model to the test set, we get a slightly higher MSE (1.243) and a slightly lower R-squared (0.21), indicating that the tuned model is slightly worse than the previous model. Summary statistics of the tuned model on the test set can be seen on table \@ref(tab:test-summary2) Even though the tuned model performs better on the training set, it performs worse on the test set. This indicates that the tuned model might over-fit the training set, therefore we choose to go with the un-tuned model.
-
-```{r test-summary2, fig.cap="Summary statistics of the random forest model on test set."}
-set.seed(2021)
-randomforest2 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity",num.threads=8,verbose=FALSE,mtry=8,min.node.size=2,num.trees=500,replace=FALSE)
-
-predicted2 <- predict(randomforest2, test2)$predictions
-
-kable(model_summary(truth = test2$fire_count,
-           estimate = predicted2))
-```
-
-To evaluate our model more, we calculated the residuals and plotted them against the predicted values. There are some high residuals, indicating that the model is not predicting some observations well. Figure \@ref(fig:map-rf1) shows the representation of the actual monthly fire counts and predicted fire counts on the training set. One clear thing to notice here is that our model tends to under-predict the fire counts, especially in March. Figure \@ref(fig:map-rf-test) shows the comparison for the test set. The predictions for the test set do not really capture the observed fire counts, which might be due to the different situations in 2020-2021 and the different number of fires every bushfire period. 2020-2021 has a higher number of fires, especially in January and March, which needs to be further explored in future works. Our model under-predicts the fire counts. Looking at the proportions of fire instead of counts might be better because looking at the pattern on the map, our model predicts those cells with higher observed fire counts to have higher predicted fire counts compared to others.
-
-```{r map-rf1, fig.cap = "A map of the monthly fire counts of the actual (left) vs the predicted values (right) resulted from the random forest model for the training set.", warning = FALSE, message = FALSE}
-tmap_arrange(actual_oct, pred_oct,
-             actual_nov, pred_nov,
-             actual_dec, pred_dec,
-             actual_jan, pred_jan,
-             actual_feb, pred_feb,
-             actual_mar, pred_mar)
-```
-
-```{r map-rf-test, fig.cap = "A map of the monthly fire counts of the actual (left) vs the predicted values (right) resulted from the random forest model for the test set.", warning = FALSE, message = FALSE}
-tmap_arrange( test_actual_oct, test_pred_oct,
-              test_actual_nov, test_pred_nov,
-              test_actual_dec, test_pred_dec,
-              test_actual_jan, test_pred_jan,
-              test_actual_feb, test_pred_feb,
-              test_actual_mar, test_pred_mar)
-```
-
-Another limitation of our model is that there are a lot of zeros in the data, which might result to the under-prediction of fire counts. As previously mentioned, there are some high residuals which might be due to the huge amount of zeros in the data, which might affect the predictions for those with similar weather conditions but with a high fire counts. Additionally, the random forest is using variables which represent weather conditions, which might not account for accident-based fires. We might also be missing some variables that are useful for predicting the risk of fire, like distance to road. This could be a consideration for our future work to include more varibles, 
-
-
-
-limitations: 
-due to many 0s, this affect the predictions. we are predicting using weather variables --> accident based fire might not be accounted here. 
-
-**lasso regression**
-A lasso regresion was implemented to parse out the important variables. Depending on the penalty ($\lambda$) term imposed on the least square optimisation problem has the effect of shrinking (unimportnat) variables to zero/very small coefficient. When $\lambda = 0$, no parameters are elimated and the estimate equal to the one found in least squares. When $\lambda$ increases, more and more coefficients are set to 0 and eliminated. When $\lambda = \infty$, all coefficients are eliminated.
+## Lasso regression
+A lasso regression was implemented to parse out the important variables. Depending on the penalty ($\lambda$) term imposed on the least square optimisation problem has the effect of shrinking (unimportnat) variables to zero/very small coefficient. When $\lambda = 0$, no parameters are elimated and the estimate equal to the one found in least squares. When $\lambda$ increases, more and more coefficients are set to 0 and eliminated. When $\lambda = \infty$, all coefficients are eliminated.
 
 To choose a suitable $\lambda$ value, 5-fold cross validation is applied. Using a $\lambda$ grid consisting of 50 levels from 0 to 10 which is the default for `tune::penalty()`. For each cross-validation fold, the regularised lasso regression model is fitted and $R^2$ and $RMSE$ was recorded. The results is shown in Figure \@ref(fig:lasso-metric) *note results are on log10 scale. The $lambda$ value that minimises the RMSE was chosen which is found to be $1.0001$. 
 
@@ -552,9 +407,163 @@ car::vif(lm_fit) %>%
 
 While lasso regression is a good regularisation technique to sieve out important variables, it is inadequate for modelling in our scenario. This is mainly due to the structure of our variables. The climate variables are highly correlated as one might expect. For example, with high `daily_rain` we would expect a lower `max_temp` or a variable with its lag variables are expectedly highly correlated. These relations exist across many of our variables thus indicating high multicollinearity. 
 
-To demonstrate, we fit a linear model and computed the Variance Inflation Factor (VIF). The 6 variables with the highest VIF is shown in \@ref(tab:vif-tab). A general rule of thumb is that if VIF $> 10$ then multicollinearity is high (REF)[https://www.andreaperlato.com/mlpost/deal-multicollinearity-with-lasso-regression/]. Lasso's objective function provides unstable solutions in prescence of collinear features or features with very similar information. [REF](https://www.lexjansen.com/wuss/2018/131_Final_Paper_PDF.pdf).
+To demonstrate, we fit a linear model and computed the Variance Inflation Factor (VIF). The 6 variables with the highest VIF is shown in \@ref(tab:vif-tab). A general rule of thumb is that if VIF $> 10$ then multicollinearity is high [@VIF]. Lasso's objective function provides unstable solutions in prescence of collinear features or features with very similar information. [@lasso].
 
 Therefore, due to the inherent interplay between the variables, lasso regression is not used for modelling. For the same reason, generalised linear models attempted such as Poisson regression were ruled out.
+
+## Random forest
+
+Random forest [@rf] is a supervised learning technique that is constructing hundreds of regression trees by using ensemble learning, combined to a robust prediction model. It consists of a large number of decision trees, which are combined by taking the mean of the predicted y values as the prediction of all trees. A random forest model is built from a bootstrap sample of the data. Each tree at each parent node is constructed from p randomly selected predictors [@rf2]. The trees run in parallel without any interactions amongst them [@rf-regression]. Random forest is well suited for non-linear relationships, which is suitable for our case as the relationship between environmental variables and the fire risk is non-linear. In this case, we are using random forest for regression problem in where the splitting in each node is based on minimising RSS.
+
+An issue with modelling the risk of bushfire based on environmental variable is the collinearity between variables. For example, relative humidity changes when temperature changes. An evidence of multicollinearity in our data can be seen in \@ref(fig:collinearity). Random forest model can handle multicollinearity problem well as it offers protection against the impact of collinearity between predictors [@rf2]. The reason for this is because random forest only considers a subset of predictors at each split, resulting to decorrelated trees. Even though multicollinearity is not a problem for the random forest algorithm itself, it might be a problem for the variable importance. Feature importance might be affected by multicollinearity as the importance of variables with high collinearity will be offset by each other. 
+
+```{r collinearity, fig.cap= "The figure shows the correlation matrix of the variables in our data. There are some variables in our data with high correlations, such as radiation has a really high correlation with et_short_crop (0.9)." }
+data_corr <- train %>%
+  ungroup() %>%
+  dplyr::select(-id, -year) 
+ggcorr(data_corr, label = T)
+```
+
+Based on our previous analysis, month is an important variable in determining the risk of fire as the risk of bushfire differs monthly. We treated month as a factor variable in our model. We fitted a random forest model with all the variables in our dataset as the explanatory variables. Our first random forest model is a model fitted using `ranger` [@ranger] without specifying the number of trees (ntree) and the number of variables used in each tree (mtry). The result is a random forest model by using 500 ntree and 5 mtry. This model has a mean of squared residuals of 1.216 and R-squared of 0.396. Test MSE resulted from this model is 2.379 with an R-squared of 0.23, indicating that random forest is better than a linear regression model. Summary statistics of the test set on the random forest model is on \@ref(tab:test-summary).
+
+```{r}
+train_final <- train %>% 
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-year) %>% mutate(month = as.factor(month))
+
+set.seed(2021)
+randomforest1 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity")
+```
+
+```{r}
+predictions <- randomforest1$predictions
+predicted_data <- train %>% bind_cols(predictions = predictions)
+kable(model_summary(truth = train$fire_count,
+           estimate = predictions))
+
+mean((predicted_data$fire_count - predicted_data$predictions)^2)
+```
+
+
+```{r test-summary, fig.cap="Summary statistics of the random forest model on test set."}
+test2 <- test %>%
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-id, -year) %>%
+  mutate(month = as.factor(month))
+
+predicted <- predict(randomforest1, test2)$predictions
+
+# Function for evaluating model
+model_summary <- function(truth, estimate){
+  
+  df_new <- data.frame(truth = truth,
+                       estimate = estimate)
+  
+  data.frame(RMSE = rmse_vec(truth, estimate),
+             MAE = mae_vec(truth, estimate),
+             "R-Square" = rsq_vec(truth, estimate),
+             check.names = F
+             ) %>% 
+   mutate(MSE = mean((truth - estimate)^2))
+}
+
+kable(model_summary(truth = test2$fire_count,
+           estimate = predicted))
+```
+
+## Features Selection
+
+We explored if only including the important variables would make the model better. As stated before, the variable importance on a random forest with multicollinearity in the data could not really be trusted. Therefore, we used `lime` [@lime] to understand which variables contribute most to the prediction of bushfire risk. Local Interpretable Model-agnostic Explanation (LIME) can explain the predictions of a regression problem in an interpretable manner, which is done by learning an interpretable model locally around the prediction [@black-box]. We split our data into data with high fire counts and data with low fire counts. Then, we sampled 4 observations from each data,  which will be passed to the `explain` function. 
+
+
+```{r}
+set.seed(2021)
+train2 <- train_final %>% dplyr::select(-fire_count)
+
+explainer <- lime(x = train2,
+                  model = randomforest1) 
+
+# dealing with model_type error
+model_type.randomForest <- function(x){
+  return("regression") # for regression problem
+}
+
+predict_model.randomForest <- function(x, newdata, type = "response") {
+
+    # return prediction value
+    predict(x, newdata) %>% as.data.frame()
+    
+}
+
+# sampling data
+data_low <- train_final %>% filter(fire_count < 5)
+data_high <- train_final %>% filter(fire_count>5)
+
+set.seed(2021)
+lime_sample1 <- sample(1:length(data_low),4)
+lime_sample2 <- sample(1:length(data_high),4)
+
+data_selected1 <- data_low[lime_sample1, ]
+data_selected2 <- data_high[lime_sample2, ]
+data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
+  dplyr::select(-fire_count)
+
+# creating explanation
+explanation <- explain(x = data_selected,
+                       explainer = explainer, 
+                       feature_select = "auto",
+                       n_features = 15)
+
+explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
+explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
+```
+
+```{r plot-features, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the low fire counts."}
+plot_features(explanation1)
+```
+
+```{r plot-features2, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the high fire counts."}
+plot_features(explanation2)
+```
+
+Figure \@ref(fig:plot-features) illustrates the predictors which explain most of the fire risk prediction for the low fire counts with the x-axis showing the relative magnitude and direction of each predictors. While figure \@ref(fig:importance-rf2) shows those for the high fire counts. It can be seen that forest and month are really important in both cases, followed by surface soil moisture (s0_pct), wind speed (si10), and radiation. The top 15 features  are mostly the same for all the observations. We used these important features to fit a random forest model, however this new model has a higher mean of squared residuals. Hence, we decided to proceed with the random forest model with all of the variables. 
+
+## Parameters tuning
+To increase the accuracy of our model, we did paramaters tuning by using the `tuneRanger` package [@tuneRanger] to find the best values of parameters for our model. Lowest error is achieved when mtry is equal to 8 and ntree equal to 500. We then fitted another random forest with these parameters and all of the predictors, which resulted to a 1.212 mean of squared error and R-squared of 0.399, which is slightly better than the previous model. After applying the model to the test set, we get a slightly higher MSE (2.39) and a slightly lower R-squared (0.21), indicating that the tuned model is slightly worse than the previous model. This might be due to the random forest model to overfit the training data, hence why it does not perform better on the test set. Summary statistics of the tuned model on the test set can be seen on table \@ref(tab:test-summary2) Even though the tuned model performs better on the training set, it performs worse on the test set. This indicates that the tuned model might over-fit the training set, therefore we choose to go with the un-tuned model.
+
+```{r test-summary2, fig.cap="Summary statistics of the random forest model on test set."}
+set.seed(2021)
+randomforest2 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity",num.threads=8,verbose=FALSE,mtry=8,min.node.size=2,num.trees=500,replace=FALSE)
+
+predicted2 <- predict(randomforest2, test2)$predictions
+
+kable(model_summary(truth = test2$fire_count,
+           estimate = predicted2))
+```
+
+To evaluate our model more, we calculated the residuals and plotted them against the predicted values. There are some high residuals, indicating that the model is not predicting some observations well. Figure \@ref(fig:map-rf1) shows the representation of the actual monthly fire counts and predicted fire counts on the training set. One clear thing to notice here is that our model tends to under-predict the fire counts, especially in March. This is due to the many zeros in our response variable which might bring down the prediction. Figure \@ref(fig:map-rf-test) shows the comparison for the test set. The predictions for the test set do not really capture the observed fire counts, which might be due to the different situations in 2020-2021 and the different number of fires every bushfire period. 2020-2021 has a higher number of fires, especially in January and March, which needs to be further explored in future works. Our model under-predicts the fire counts. Looking at the proportions of fire instead of counts might be better because looking at the pattern on the map, our model predicts those cells with higher observed fire counts to have higher predicted fire counts compared to others.
+
+```{r map-rf1, fig.cap = "A map of the monthly fire counts of the actual (left) vs the predicted values (right) resulted from the random forest model for the training set.", warning = FALSE, message = FALSE}
+tmap_arrange(actual_oct, pred_oct,
+             actual_nov, pred_nov,
+             actual_dec, pred_dec,
+             actual_jan, pred_jan,
+             actual_feb, pred_feb,
+             actual_mar, pred_mar)
+```
+
+```{r map-rf-test, fig.cap = "A map of the monthly fire counts of the actual (left) vs the predicted values (right) resulted from the random forest model for the test set.", warning = FALSE, message = FALSE}
+tmap_arrange( test_actual_oct, test_pred_oct,
+              test_actual_nov, test_pred_nov,
+              test_actual_dec, test_pred_dec,
+              test_actual_jan, test_pred_jan,
+              test_actual_feb, test_pred_feb,
+              test_actual_mar, test_pred_mar)
+```
+
+Another limitation of our model is that there are a lot of zeros in the data, which might result to the under-prediction of fire counts. As previously mentioned, there are some high residuals which might be due to the huge amount of zeros in the data, which might affect the predictions for those with similar weather conditions but with a high fire counts. Additionally, the random forest is using variables which represent weather conditions, which might not account for accident-based fires. We might also be missing some variables that are useful for predicting the risk of fire, like distance to road. This could be a consideration for our future work to include more variables.
+
+
 
 # App (user-interface)
 This app is an extension to an previously made `RShiny` app (publicly available on [Department of Econometrics and Business Statistics, Monash University](https://ebsmonash.shinyapps.io/VICfire/). The intent of the previous app was to increase accessibility to the general public and fire department personnel run the clustering model to predict the risk of bushfire; given a fire occur. Our complementary goal (as per Research grant) is to develop risk models to visualise and monitor potential fire ignitions and track fires from satellite hotspots, in real time, for 2021-2022 Victorian bushfire season.   
@@ -585,23 +594,4 @@ Another limitation of our model is that there are a lot of zeros in the data, wh
 # References
 
 
-Bakshi, C. (2020, June 9). Random Forest Regression. gitconnected. https://levelup.gitconnected.com/random-forest-regression-209c0f354c84)
 
-Bates, BC, L McCaw, and AJ Dowdy (2018). Exploratory analysis of lightning-ignited
-wildfires in the Warren Region, Western Australia. Journal of environmental management
-225, 336–345.
-
-Breiman, L (2001). Random forests. Machine learning 45(1), 5–32.
-
-Ester, M, HP Kriegel, J Sander, X Xu, et al. (1996). A density-based algorithm for discovering
-clusters in large spatial databases with noise. In: Kdd. Vol. 96. 34, pp.226–231.
-
-Loboda, T. & Csiszar, I. (2007). Reconstruction of fire spread within wildland fire events in Northern Eurasia from the MODIS active fire product. Global and Planetary Change 56(3-4), 258–273.
-
-Matsuki, K., Kuperman, V., & Dyke, J. A. V. (2016). The Random Forests statistical technique: An examination of its value for the study of reading. Scientific Studies of Reading, 20(1), 20-33.
-
-Merton Council. (2013). Fire Safety Risk Assessment. merton.gov.uk. https://www.merton.gov.uk/assets/Documents/www2/fire_safety_risk_assessment_-_june_2013.pdf
-
-Williamson, G (2020). Example code to generate animation frames of Himawari-8 hotspots.
-https://gist.github.com/ozjimbob/80254988922140fec4c06e3a43d069a6 (visited
-on 10/10/2021).
