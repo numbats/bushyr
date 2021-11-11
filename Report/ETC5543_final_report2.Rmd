@@ -82,7 +82,7 @@ Fire ignitions are represented as spatial points on the map. There were two sour
 Firstly, hotspot satellite data from Himawari-8 satellite. Fire ignitions were detected using a clustering algorithm able to detect fires in real-time. (more information available in Patrick’s github). Secondly, historical First Responder’s data, this can be thought of as fires reported upon sight. That is, the First Respondent’s data was based on where the first responder saw the fire. Most of these were reports from volunteers manning fire towers erected around Victoria. (see appendix for map of fire towers around Victoria). Below shows fire ignitions data overlayed onto griided map of Victoria. 
 
 
-```{r ignition-pts, fig.cap="fire ignitions represented as points on Victoria map"}
+```{r ignition-pts, fig.cap="fire ignitions represented as points on Victoria map", eval=FALSE}
 # from eda's `cluster_map_facet_bf_season`
 cluster_map_bf_season <- ignition_rasterize_cluster_bf_season %>% 
   mutate(fire_count = case_when(
@@ -129,7 +129,7 @@ cluster_map_bf_season
 The fuel layer data is obtained from the 2018 nationwide forest dataset from Australian Bureau of Agricultural and Resource Economics and Services (2018). This data consists of a continental spatial dataset of forest extent by national forest categories and types. A forest variable is used as a predictor in our model in where 0 indicates that the grid cell is not a forest and 1 if otherwise.
 
     B
-```{r var-tab}
+```{r var-tab, eval=FALSE}
 tibble::tribble(~source, ~variables, ~format, ~temporal_resolution,
                 "SILO (https://www.longpaddock.qld.gov.au/silo/)", "max_temp, rh, radiation, et_short_crop, daily_rain", "NetCDF", "daily",
                 
