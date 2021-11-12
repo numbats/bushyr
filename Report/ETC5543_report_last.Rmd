@@ -156,9 +156,7 @@ plot(xh_raw,
      yaxt = "n")
 
 points(hotspot20172018, 
-       pch = 20,
-       col = alpha(0.5))
-
+       pch = 20)
 ```
 
 ```{r clustered-hotspot}
@@ -338,7 +336,7 @@ mean((predicted_data$fire_count - predicted_data$predictions)^2)
 ```
 
 
-```{r test-summary, fig.cap="Summary statistics of the random forest model on test set."}
+```{r test-summary}
 test2 <- test %>%
   left_join(lonlat, by = "id") %>%
   dplyr::select(-id, -year) %>%
@@ -347,7 +345,8 @@ test2 <- test %>%
 predicted <- predict(randomforest1, test2)$predictions
 
 kable(model_summary(truth = test2$fire_count,
-           estimate = predicted))
+                    estimate = predicted),
+      caption = "Summary statistics of the random forest model on test set.")
 ```
 
 ### Features Selection
@@ -444,7 +443,7 @@ After exploring some modeling alternatives, we chose random forest as our final 
 
 Another limitation of our model is that there are a lot of zeros in the data, which might result to the under-prediction of fire counts. As previously mentioned, there are some high residuals which might be due to the huge amount of zeros in the data, which might affect the predictions for those with similar weather conditions but with a high fire counts. Additionally, the random forest is using variables which represent weather conditions, which might not account for accident-based fires. We might also be missing some variables that are useful for predicting the risk of fire, like distance to road. This could be a consideration for our future work to include more variables.
 
-## Model Alternatives
+## Choosing the Random Forests and Model Alternatives
 
 A lasso regression was attempted to parse out important variables. Depending on the penalty ($\lambda$) term imposed on the least square optimisation problem has the effect of shrinking (unimportant) variables to zero/very small coefficient. While lasso regression can be a good regularisation technique to sieve out important variables, it is inadequate for modelling in our scenario. This is mainly due to the structure of our variables. The climate variables are highly correlated as one might expect. For example, with high `daily_rain` one can expect a lower `max_temp` or a variable with its lag variables are highly correlated. These relations exist across many of our variables thus indicating high  multicollinearity
 
@@ -467,6 +466,8 @@ car::vif(lm_fit) %>%
 To demonstrate, we fit a simple linear model and compute the Variance Inflation Factor (VIF). The 6 variables with the highest VIF is shown in \@ref(tab:vif-tab). A general rule of thumb is that if VIF $> 10$ then multicollinearity is high (REF)[https://www.andreaperlato.com/mlpost/deal-multicollinearity-with-lasso-regression/]. Lasso's objective function provides unstable solutions in prescence of collinear features or features with very similar information. [REF](https://www.lexjansen.com/wuss/2018/131_Final_Paper_PDF.pdf). 
 
 Therefore, due to the inherent interplay between the variables, lasso regression is not used for modelling. For the same reason, generalised linear models(GLMs) attempted such as Poisson regression were ruled out. 
+
+Since ensemble learning with random forest process can deal with these issues, it was deemed suitable in our modelling scenario. Random forests had been used in several studies to model bushfire susceptibility. (@gigovic2019testing) 
 
 
 # Shiny Web application (User-Interface)
