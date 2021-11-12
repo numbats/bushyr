@@ -1,11 +1,12 @@
 ---
 title: "ETC5543_final_report3"
-author: "Brenwin"
+author: "Brenwin Ang, Helen Evangelina"
 date: "12/11/2021"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
 # --- load libraries
 library(tidyverse)
 library(patchwork)

@@ -3,7 +3,8 @@ title: "Development of Bushfire Risk Prediction Web App in Victoria using Open D
 author: "Brenwin Ang & Helen Evangelina"
 date: "12/11/2021"
 output:
-  bookdown::html_document2
+  bookdown::html_document2:
+    number_sections: false
 bibliography: references.bib
 ---
 
@@ -36,33 +37,36 @@ load(here::here("VICfire/data/hotspot.RData"))
 
 # Introduction and Motivation
 
-Bushfires is a common and natural phenomemon that occurs frequently in many places around the world. Melbourne Victoria however, is one of the most fire-prone regions in the world - given its fire conducive weather and fuel conditions. It is an intrinsic and inevitable part of Australia’s environment [@geoscience]. Survey studies by ANU shown that about 80% affects Australians in some way whether through direct damage or indirectly through anxiety or smoke (@aus-bf-imp). 
+Bushfires is a common and natural phenomemon that occurs frequently in many places around the world. Victoria, Australia however, is one of the most fire-prone regions in the world - given its fire conducive weather and fuel conditions. It is an intrinsic and inevitable part of Australia’s environment which has significantly shaped our landscape [@geoscience]. Survey studies by ANU shown that about 80% affects Australians in some way whether through direct damage or indirectly through anxiety or smoke (@aus-bf-imp). 
 
-There have been some catastrophic bushfire events in the past including Black Saturday 2009 in Victoria, Ash Wednesday 1983 in Victoria and South Australia, the 2006 December bushfires, as well as the recent 2019-2020 bushfires. Canada, USA, Turkey, Greece, Italy and Russia faced a devastating bushfire season in the summer of 2021 since it was the hottest July ever recorded, raising concern for Australia since it is moving into summer. Especially since the 2019-2020 bushfire in Australia resulted to more damages on property and the environment compared to other bushfire events in history, with 3094 houses destroyed and over 17M hectares of land burned [@bushfire1]. 
+There have been catastrophic bushfire events in the past including Black Saturday 2009 in Victoria, Ash Wednesday 1983 in Victoria and South Australia, the 2006 December bushfires, as well as the recent 2019-2020 bushfires. (@ffm-past) Canada, USA, Turkey, Greece, Italy and Russia faced a devastating bushfire season in the summer of 2021 since it was the hottest July ever recorded, raising concern for Australia since it is moving into summer. Especially since the 2019-2020 bushfire in Australia resulted to more damages on property and the environment compared to other bushfire events in history, with 3094 houses destroyed and over 17M hectares of land burned [@bushfire1]. 
 
-Even though bushfires cannot be avoided naturally, their consequences can be minimised. Thus, it is important to predict the risk of bushfire as understanding the risk of fire of certain areas would help in developing strategies for mitigating the risks. A prediction model can tell us whether an area has a high risk of bushfire, and we can focus on areas with high fire risk. We will use certain modeling methods to come up with the most suitable model for predicting the bushfire risk. 
+Even though bushfires cannot be avoided naturally, their consequences can be minimised. Thus, it is important to predict the risk of bushfire as understanding the risk of fire of certain areas would help in developing strategies for mitigating the risks. A prediction model can tell us whether an area has a high risk of bushfire, so our resources can be focused on areas with high fire risk. Certain modeling methods are used to come up with the most suitable model for predicting the bushfire risk. 
 
-This work will focus on Victoria. Victoria is one of the most fire-prone region in the world, given its fire conducive weather and fuel conditions. This report condenses the research work on bushfire risk modelling done by Brenwin Ang and Helen Evangelina as part of their internship for ETC5543 Business Analytics Creative Activity coursework. This is an extension to the work done by Di Cook, Emily Dodwell and Patrick Li on hotspot clustering algorithm. It is based on Patrick Li’s thesis titled “Using Remote Sensing Data to Understand Fire Ignitions in Victoria during the 2019-2020 Australian Bushfire Season” [@patricksthesis]. Weather is considered a determinant for forest fires. Therefore, environmental variables such as temperature, relative humidity, wind speed, radiation, drought index, etc are used in the modelling as predictors. 
+This work will focus on Victoria. Victoria is one of the most fire-prone region in the world, given its fire conducive weather and fuel conditions. This report condenses the research work on bushfire risk modelling done by Brenwin Ang and Helen Evangelina as part of their internship for ETC5543 Business Analytics Creative Activity coursework. This is an extension to the work done by Di Cook, Emily Dodwell and Patrick Li on hotspot clustering algorithm. It is based on Patrick Li’s thesis titled “Using Remote Sensing Data to Understand Fire Ignitions in Victoria during the 2019-2020 Australian Bushfire Season” [@patricksthesis]. Weather is considered a determinant for forest fires. Therefore, environmental variables such as temperature, relative humidity, wind speed, radiation, drought index, etc will be used in the modelling as predictors. 
 
-Generally, fire risk is defined as the likelihood of a fire occurring, multiplied by the severity of the fire [@merton]. In the case of this report, fire risk is defined as likelihood of fire ignition occurring. The overall objective of this work is to develop a web app by using shiny to monitor potential fire ignitions by developing fire risk models for the 2021-2022 Victorian bushfire season based on environmental variables in where users would be able to input the values of the environmental variables which would change the risk predictions. The resulting app seeks to improve accessibility to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change. The github repository including Patrick’s thesis can be found [here](https://github.com/numbats/bushyr).
+Generally, fire risk is defined as the likelihood of a fire occurring, multiplied by the severity of the fire [@merton]. In the case of this report, fire risk is defined as likelihood of fire ignition occurring. The overall objective of this work is to develop a `Shiny` web app to monitor potential fire ignitions, incorporating fire risk model developed to monitor the 2021-2022 Victorian bushfire season based on environmental variables in where users would be able to input the values of the environmental variables which would change the risk predictions. The resulting app seeks to enable easy access to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change. The github repository including Patrick’s thesis can be found [here](https://github.com/numbats/bushyr).
 
 
 # Data Sources and Integration
 
-Following data analysis is based off the map of Victoria that is divided into 20x20 cells (shown above). Each cell is roughly $0.451° \times 0.257°$ (or $50km \times 28km$). Note that only cells within Victoria were considered. The partitioning the study area into equally-sized marked grid cells greatly facilitates the analysis- allows comparisons between cells, point-based fire ignitions to be viewed not just as individual points but as a spatially varying density throughout the study area. The cell cize can be determined through exploratory data analysis (@cardille2001occurrence). From (other) gridded data or vector data, it also allows numeric and categorical variables to be co-registered to each cell.  A coarse grid cell was deemed adequate to spread out the spatial variation or likelihood of fire ignitions while conserving landscape-level attributes.
+Following data analysis is based off the map of Victoria that is divided into 20x20 cells. Each cell is roughly $0.451° \times 0.257°$ (or $50km \times 28km$). Note that only cells within Victoria were considered. The partitioning the study area into equally-sized marked grid cells greatly facilitates the analysis- allows comparisons between cells, point-based fire ignitions to be viewed not just as individual points but as a spatially varying density throughout the study area. The cell cize can be determined through exploratory data analysis (@cardille2001occurrence). From (other) gridded data or vector data, it also allows numeric and categorical variables to be co-registered to each cell.  A coarse grid cell was deemed adequate to spread out the spatial variation or likelihood of fire ignitions while conserving landscape-level attributes. Nevertheless, this is easily tunable.
 
-Our study also only focuses on bushfire seasons of October through to March given that most fire occur during these period. Data dates from 2016 to 2021. The period of data used presents a trade-off: the data must be long enough to capture the temporal variability but not too long that it ignores the changes in the data such as climate change or human-induced spatial ignition patterns. (@burn_p3)
+The study also only focuses on bushfire seasons of October through to March given most fire occur during these period. Data dates from 2016 to 2021. The period of data used presents a trade-off- the data must be long enough to capture the temporal variability but not too long that it ignores the changes in the data such as climate change or human-induced spatial ignition patterns. (@burn_p3)
 
 ## Fire Ignitions Data
 
-As mentioned above, Fire ignitions are represented as spatial points on the map. There were two sources of bushfire ignitions data.
+Fire ignitions are represented as spatial points on the map. There were two sources of bushfire ignitions data.
 
-Firstly, satellite hotspot data from Himawari-8 satellite taken from the [Japan Aerospace Exporation Agency FTP site](https://www.eorc.jaxa.jp/ptree/faq.html). Himawari-8 data is a remote sensing data collected by remote sensors carried by a satellite. Upside of this data is that it provides a high temporal and spatial resolution. It is able to capture bushfires starting from remote areas very difficult to access by foot. It has a 10-minute time resolution. Fire ignitions were detected in real-time using a clustering algorithm. (more information on how this is done can be found in [Patrick's thesis on github](https://github.com/TengMCing/bushfire-paper)). 
+Firstly, satellite hotspot data from Himawari-8 satellite taken from the [Japan Aerospace Exporation Agency FTP site](https://www.eorc.jaxa.jp/ptree/faq.html). Himawari-8 data is a remote sensing data collected by remote sensors carried by a satellite. Upside of this data is that it provides a high temporal and spatial resolution. It is able to capture bushfires starting from remote areas very difficult to access by foot. Additionally, it has a 10-minute time resolution. Fire ignitions were detected in real-time using a clustering algorithm produced previously. (more information on how this is done can be found in [Patrick's thesis on github](https://github.com/TengMCing/bushfire-paper)). 
 
 Secondly, historical First Responder's data, this can be thought of as fires reported upon sight. That is, based on where the First Responder saw the fire. This is sourced from the Department of Environment, Land, Water and Planning (DELWP). Most of these were reports from volunteers manning fire toweres erected around Victoria. (See appendix for map of fire towers around Victoria)
 
 
 ## Climate and Landscape Variables
+
+For a bushfire to ignite, it needs an ignition source and conducive weather and landscape conditions. Fire ignitions can be classified into 4 categories- lightning, arson, accident and planned burning off (back burning which escaped containment line). Previous analysis suggests more than 80% of fires can be attributed to lightning. @the-conv. 
+
 ```{r var-tab}
 tibble::tribble(~data_source, ~variables, ~format, ~temporal_resolution, ~spatial_resolution,
                 "SILO (https://www.longpaddock.qld.gov.au/silo/)", "max_temp, rh, radiation, et_short_crop, daily_rain", "NetCDF", "daily", "0.05° x 0.05°",
@@ -76,18 +80,15 @@ tibble::tribble(~data_source, ~variables, ~format, ~temporal_resolution, ~spatia
   kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
 ```
 
-For a bushfire to ignite, it needs an ignition source and conducive weather conditions. Fire ignitions can be classified into 4 categories- lightning, arson, accident and planned burning off (back burning which escaped containment line). Previous analysis suggests more than 80% of fires can be attributed to lightning. (@the-conv) 
-> Studies have demonstrated empircally a relationship between fire ignitions and weather & landscape conditions.
+In this analysis, 11 covariates are considered to identify their effect on bushfire ignitions. These variables are: maximum temperature (`max_temp`) ($°C$), relative humidity (`rh`) ($\%$), solar radiation (`radiation`) ($MJ/m^2$), derived FAO56 short crop evapotranspiration rate (`et_short_crop`) ($mm$), daily rainfall (`daily_rain`) ($mm$), leaf area index in high vegetation in $m^2 \ m^{-2}$ (`lai_hv`) ($m^2 \ m^{-2}$), leaf area index in low vegetation (`lai_lv`) ($m^2 \ m^{-2}$), 10m wind speed (`WS10`) ($m\ s^{-1}$)  and  forest type in Victoria (`vic_forest`). Information about the data sources of each of the variables presented in Table \@ref(tab:var-tab) above. *More information regarding the data sources can be found in the Appendix.
 
-In this analysis, 11 covariates are considered to identify their effect on bushfire ignitions. These variables are: maximum temperature (`max_temp`) ($°C$), relative humidity (`rh`) ($\%$), solar radiation (`radiation`) ($MJ/m^2$), derived FAO56 short crop evapotranspiration rate (`et_short_crop`) ($mm$), daily rainfall (`daily_rain`) ($mm$), leaf area index in high vegetation in $m^2 \ m^{-2}$ (`lai_hv`) ($m^2 \ m^{-2}$), leaf area index in low vegetation (`lai_lv`) ($m^2 \ m^{-2}$), 10m wind speed (`WS10`) ($m\ s^{-1}$)  and  forest type in Victoria (`vic_forest`). These variables are presented in Table \@ref(tab:var-tab) above. *More information regarding the data sources can be found in the Appendix.
+A subset of these variables namely `max_temp`, `rh`, `WS10` and `et_short_crop` (proxy for meteorological drought index) are used in McArthur Forest Fire Danger Index (FFDI), which is used widely around Australia to measure the degree of danger of fire in Australian forests. @bf-crc A plethora of studies have investigated the causes of widespread bushfires. However, to date, most of the existing literature focuses mainly on bushfire spread rather than ignitions. 
 
-A subset of these variables namely `max_temp`, `rh`, `WS10` and `et_short_crop` (proxy for meteorological drought index) are used in McArthur Forest Fire Danger Index (FFDI), which is used widely around Australia to measure the degree of danger of fire in Australian forests. [REF](https://www.bushfirecrc.com/sites/default/files/managed/resource/ctr_010_0.pdf). A plethora of studies have investigated the causes of widespread bushfires. However, to date, most of the existing literature focuses mainly on bushfire spread rather than ignitions. 
+As seen in the table, many of these data sources provide too fine a spatial grid resolution than required for our structure. Therefore, these are regridded to match the $20 \times 20$ gridded Victoria map. For numeric variables (all except `vic_forest`), the values of the finer cells within our larger cells are averaged. Categorical variable (`vic_forest`) are encoded into indicator variables, for example, any grid cell containing a forest is set to a value of 1, and 0 otherwise.    
 
-As seen in the table, many of these data sources provide too fine a spatial grid resolution than required for our structure. Therefore, these are regridded to match the $20 \times 20$ gridded Victoria map above. For numeric variables (all except `vic_forest`), the values of the finer cells within our larger cells are averaged. Categorical variable (`vic_forest`) are encoded into indicator variables, for example, any grid cell containing a forest is set to a value of 1, and 0 otherwise.    
+Additionally, 2 months lag of each of the variable (except `vic_forest` since it is periodic data) was included in the modelling. Studies have shown that not just current conditions but ongoing conditions such as heatwaves or drought creates favourable for bushfire ignitions. @causes_abf
 
-Additionally, 2 months lag of each of the variable (except `vic_forest`) was included in the modelling. This was because few studies have shown that not just current conditions but ongoing conditions such as heatwaves or drought creates favourable for bushfire ignitions(@causes_abf). 
-
-In the process, we automated the process of extracting the variables from the various sources.
+In the process, we automated the workflow of extracting the variables from the various sources.
 
 ```{r max-temp, fig.cap="Average max temperature for the month of May 2021", eval = FALSE}
 max_temp_raster_crop %>% 
@@ -131,7 +132,8 @@ The issue with using DBSCAN for clustering hotspot data is its algorithm assumes
 
 There are four steps in the clustering algorithm. The first step is to slice the temporal dimension based on a parameter named ActiveTime. Next, the hotspots are clustered spatially by using a parameter called AjdDist, which reflects the potential distance a fire can spread with respect to the temporal resolution of the data. Hotspots in the same component will be assigned a unique membership id. The third step is to broadcast the clustering results and update the membership label. Lastly, the ignition locations are computed with the earliest observed hotspot indicates the ignition point. If there are several earliest hotspots, the centroid of these points is used. 
 
-The clustering algorithm slices the data by its temporal dimension and splits the spatio-temporal clustering tasks into thousands spatial clustering tasks. The result of the clustering is a dataset consisting of four variables – unique identifier, longitude, latitude, and time. The final hotspot data used for this project consists of 2,917 observations from 2016 to 2021. The maps below illustrate the spatial distribution of ignition points on the raw hotspot data and on the clustered hotspot data.
+The clustering algorithm slices the data by its temporal dimension and splits the spatio-temporal clustering tasks into thousands spatial clustering tasks. The result of the clustering is a dataset consisting of four variables – unique identifier, longitude, latitude, and time. The final hotspot data used for this project consists of 2,917 observations from 2016 to 2021. The maps below illustrate the spatial distribution of ignition points on the raw hotspot data and on the clustered hotspot data. 
+
 ```{r raw-hotspot}
 # raw hotspot data
 coordinates(hotspot20172018) <- c("lon", "lat")
@@ -149,8 +151,14 @@ tabh_raw <- table(cellFromXY(xh_raw, hotspot20172018))
 
 xh_raw[as.numeric(names(tabh_raw))] <- tabh_raw
 
-plot(xh_raw)
-points(hotspot20172018, pch = 20)
+plot(xh_raw,
+     xaxt = "n",
+     yaxt = "n")
+
+points(hotspot20172018, 
+       pch = 20,
+       col = alpha(0.5))
+
 ```
 
 ```{r clustered-hotspot}
@@ -170,13 +178,16 @@ tabh_cl <- table(cellFromXY(xh_cl, hotspot_clustered20172018))
 
 xh_cl[as.numeric(names(tabh_cl))] <- tabh_cl
 
-plot(xh_cl)
+plot(xh_cl,
+     xaxt = "n",
+     yaxt = "n")
+
 points(hotspot_clustered20172018, pch = 20)
 ```
 
 # Model Building
 
-To prevent overlaps of fire ignitions, only one of the historical or satellite fire ignition data needs to be chosen. Historical fire data might not represent the accurate locations of the bushfire ignitions. Fire might start in a remote location which might be hard to visually access or monitor. Therefore, to choose which fire data to use for our modelling, we do comparisons on the historical fire data and the satellite data. The satellite data used here is the clustered satellite data.
+To prevent overlaps of fire ignitions, only one of the historical or satellite fire ignition data is chosen for the purpose of modelling. Historical fire data might not represent the accurate locations of the bushfire ignitions. Fire might start in a remote location which might be hard to visually access or monitor. Therefore, to choose which fire data to use for our modelling, we do comparisons on the historical fire data and the satellite data. The satellite data used here is the clustered satellite data.
 
 ## Comparison of Hotspot and Historical Fire Data
 
@@ -460,7 +471,7 @@ Therefore, due to the inherent interplay between the variables, lasso regression
 
 # Shiny Web application (User-Interface)
 
-The outputs of data processing and bushfire predictions are put together in an app. This app is an extension to an previously made `RShiny` app (publicly available on [Department of Econometrics and Business Statistics, Monash University](https://ebsmonash.shinyapps.io/VICfire/). The previous app allow users to visualise bushfires in Victoria at a period of time of their choosing. Outputs are based on the clustering results. Also, a model predicts the cause of bushfire; given a bushfire ignition. Our complementary goal (as per Research grant) is to develop risk model to visualise and monitor potential fire ignitions and track fires from satellite hotspots, in real time, for 2021-2022 Victorian bushfire season.   
+The outputs of data processing and bushfire predictions are put together in an app. This app is an extension to an [previously made `RShiny` app]((https://ebsmonash.shinyapps.io/VICfire/)) (publicly available on Department of Econometrics and Business Statistics, Monash University. The previous app allow users to visualise bushfires in Victoria at a period of time of their choosing. Outputs are based on the clustering results. Also, a model predicts the cause of bushfire; given a bushfire ignition. Our complementary goal (as per Research grant) is to develop risk model to visualise and monitor potential fire ignitions and track fires from satellite hotspots, in real time, for 2021-2022 Victorian bushfire season.   
 
 `RShiny` allows for elegant interactive exploratory plots and updates in real-time for swift decision making. It is also highly customisable to enhance users' interface. Furthermore, it supplies convenience function to assemble the html website in `R` and is easy to deploy. 
 
