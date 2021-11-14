@@ -35,17 +35,20 @@ load(here::here("VICfire/data/report_data.RData"))
 load(here::here("VICfire/data/hotspot.RData"))
 ```
 
+
+
 # Introduction and Motivation
 
 Bushfires is a common and natural phenomemon that occurs frequently in many places around the world. Victoria, Australia however, is one of the most fire-prone regions in the world - given its fire conducive weather and fuel conditions. It is an intrinsic and inevitable part of Australia’s environment which has significantly shaped our landscape [@geoscience]. Survey studies by ANU shown that about 80% affects Australians in some way whether through direct damage or indirectly through anxiety or smoke (@aus-bf-imp). 
 
-There have been catastrophic bushfire events in the past including Black Saturday 2009 in Victoria, Ash Wednesday 1983 in Victoria and South Australia, the 2006 December bushfires, as well as the recent 2019-2020 bushfires. (@ffm-past) Canada, USA, Turkey, Greece, Italy and Russia faced a devastating bushfire season in the summer of 2021 since it was the hottest July ever recorded, raising concern for Australia since it is moving into summer. Especially since the 2019-2020 bushfire in Australia resulted to more damages on property and the environment compared to other bushfire events in history, with 3094 houses destroyed and over 17M hectares of land burned [@bushfire1]. 
+There have been catastrophic bushfire events in the past including Black Saturday 2009 in Victoria, Ash Wednesday 1983 in Victoria and South Australia, the 2006 December bushfires, as well as the recent 2019-2020 bushfires. (@ffm-past) Canada, USA, Turkey, Greece, Italy and Russia faced a devastating bushfire season in the summer of 2021 since it was the hottest July ever recorded, raising concern for Australia since it is moving into summer. Especially since the 2019-2020 bushfire in Australia known colloquially as Black Summer resulted to more damages on property and the environment compared to other bushfire events in history, with 3094 houses destroyed and over 17M hectares of land burned [@bushfire1]. 
 
-Even though bushfires cannot be avoided naturally, their consequences can be minimised. Thus, it is important to predict the risk of bushfire as understanding the risk of fire of certain areas would help in developing strategies for mitigating the risks. A prediction model can tell us whether an area has a high risk of bushfire, so our resources can be focused on areas with high fire risk. Certain modeling methods are used to come up with the most suitable model for predicting the bushfire risk. 
+Even though bushfires cannot be avoided naturally, their consequences can be minimised. Thus, it is important to understand and predict the risk of bushfire as understanding the risk of fire of certain areas would help in developing strategies for mitigating the risks. Effective bushfire risk management pivots around providing relevant and timely data to both the emergency personnel and public. For instance, a prediction model can tell us whether an area has a high risk of bushfire, so resources can be focused on areas with high fire risk.
 
-This work will focus on Victoria. Victoria is one of the most fire-prone region in the world, given its fire conducive weather and fuel conditions. This report condenses the research work on bushfire risk modelling done by Brenwin Ang and Helen Evangelina as part of their internship for ETC5543 Business Analytics Creative Activity coursework. This is an extension to the work done by Di Cook, Emily Dodwell and Patrick Li on hotspot clustering algorithm. It is based on Patrick Li’s thesis titled “Using Remote Sensing Data to Understand Fire Ignitions in Victoria during the 2019-2020 Australian Bushfire Season” [@patricksthesis]. Weather is considered a determinant for forest fires. Therefore, environmental variables such as temperature, relative humidity, wind speed, radiation, drought index, etc will be used in the modelling as predictors. 
+This report condenses the research work on bushfire risk modelling done by Brenwin Ang and Helen Evangelina as part of their internship for ETC5543 Business Analytics Creative Activity coursework. This work focus its window of study in Victoria. This is an extension to the work done by Di Cook, Emily Dodwell and Patrick Li on hotspot clustering algorithm. It is based on Patrick Li’s thesis titled “Using Remote Sensing Data to Understand Fire Ignitions in Victoria during the 2019-2020 Australian Bushfire Season” [@patricksthesis]. Weather is considered a determinant for forest fires. Therefore, environmental variables such as temperature, relative humidity, wind speed, radiation, drought index, etc will be used in the modelling as predictors. 
 
-Generally, fire risk is defined as the likelihood of a fire occurring, multiplied by the severity of the fire [@merton]. In the case of this report, fire risk is defined as likelihood of fire ignition occurring. The overall objective of this work is to develop a `Shiny` web app to monitor potential fire ignitions, incorporating fire risk model developed to monitor the 2021-2022 Victorian bushfire season based on environmental variables in where users would be able to input the values of the environmental variables which would change the risk predictions. The resulting app seeks to enable easy access to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change. The github repository including Patrick’s thesis can be found [here](https://github.com/numbats/bushyr).
+Generally, fire risk is defined as the likelihood of a fire occurring, multiplied by the severity of the fire [@merton]. In the case of this report, fire risk is defined as likelihood of fire ignition occurring. The overall objective of this work is to develop a `Shiny` web app to monitor potential fire ignitions, incorporating fire risk model developed to monitor the 2021-2022 Victorian bushfire season based on environmental variables in where users would be able to toggle the input values of the environmental variables which would be incorporated the risk predictions. The resulting app seeks to enable easy access to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change. The corresponding github repository including Patrick’s thesis can be found [here](https://github.com/numbats/bushyr).
+
 
 
 # Data Sources and Integration
@@ -88,7 +91,7 @@ As seen in the table, many of these data sources provide too fine a spatial grid
 
 Additionally, 2 months lag of each of the variable (except `vic_forest` since it is periodic data) was included in the modelling. Studies have shown that not just current conditions but ongoing conditions such as heatwaves or drought creates favourable for bushfire ignitions. @causes_abf
 
-In the process, we automated the workflow of extracting the variables from the various sources.
+In the process, we automated the workflow of extracting the variables from the various sources- giving access to a wide range of potential predictors. 
 
 ```{r max-temp, fig.cap="Average max temperature for the month of May 2021", eval = FALSE}
 max_temp_raster_crop %>% 
@@ -182,6 +185,8 @@ plot(xh_cl,
 
 points(hotspot_clustered20172018, pch = 20)
 ```
+
+
 
 # Model Building
 
@@ -463,20 +468,21 @@ car::vif(lm_fit) %>%
 ```
 
 
-To demonstrate, we fit a simple linear model and compute the Variance Inflation Factor (VIF). The 6 variables with the highest VIF is shown in \@ref(tab:vif-tab). A general rule of thumb is that if VIF $> 10$ then multicollinearity is high @andreaperlato. Lasso's objective function provides unstable solutions in prescence of collinear features or features with very similar information. @schreiber2018regulation 
+To demonstrate, we fit a simple linear model and compute the Variance Inflation Factor (VIF). The 6 variables with the highest VIF is shown in Table \@ref(tab:vif-tab). A general rule of thumb is that if VIF $> 10$ then multicollinearity is high @andreaperlato. Lasso's objective function provides unstable solutions in prescence of collinear features or features with very similar information. @schreiber2018regulation 
 
 Therefore, due to the inherent interplay between the variables, lasso regression is not used for modelling. For the same reason, generalised linear models(GLMs) attempted such as Poisson regression were ruled out. 
 
 Since ensemble learning with random forest process can deal with these issues, it was deemed suitable in our modelling scenario. Random forests had been used in several studies to model bushfire susceptibility. (@gigovic2019testing) 
 
 
+
 # Shiny Web application (User-Interface)
 
-The outputs of data processing and bushfire predictions are put together in an app. This app is an extension to an [previously made `RShiny` app]((https://ebsmonash.shinyapps.io/VICfire/)) (publicly available on Department of Econometrics and Business Statistics, Monash University. The previous app allow users to visualise bushfires in Victoria at a period of time of their choosing. Outputs are based on the clustering results. Also, a model predicts the cause of bushfire; given a bushfire ignition. Our complementary goal (as per Research grant) is to develop risk model to visualise and monitor potential fire ignitions and track fires from satellite hotspots, in real time, for 2021-2022 Victorian bushfire season.   
+The outputs of data processing and bushfire predictions are put together in an app. This app is an extension to an previously made `RShiny` app (publicly available at [Monash University's Department of Econometrics and Business Statistics website](https://ebsmonash.shinyapps.io/VICfire/). The previous app allow users to visualise bushfires in Victoria at a period of time of their choosing. Outputs are based on the clustering results. Also, a model predicts the cause of bushfire; given a bushfire ignition. Our complementary goal (as per Research grant) is to develop risk model to visualise and monitor potential fire ignitions and track fires from satellite hotspots, in real time, for 2021-2022 Victorian bushfire season.   
 
 `RShiny` allows for elegant interactive exploratory plots and updates in real-time for swift decision making. It is also highly customisable to enhance users' interface. Furthermore, it supplies convenience function to assemble the html website in `R` and is easy to deploy. 
 
-The current project builds on the "Fire Risk" Tab. On top of the historical bushfire information and bushfire `cause` prediction, this complementary addition serves to inform users with historical information risk and up-to-date predictions around bushfire risk. We maintained a similar design for the structure of the app- keeping separate tabs for historical information and predictions. This is to cater for different users who might be using the app. Fire personnels might be interested in the weather and landscape variables creating the conducive fire environment. While users would be interested in bushfire predictions while planning a trip for instance.   
+The current project builds on the "Fire Risk" Tab. On top of the historical bushfire information and bushfire `cause` prediction, this complementary addition serves to inform users with historical information risk and up-to-date predictions around bushfire risk. We maintained a similar design for the structure of the app- keeping separate tabs for historical information and predictions. This is to cater for different users who might be using the app. Fire personnels might be interested in the weather and landscape variables creating the conducive fire environment. Plots and data are made downloadable. While users would be interested in bushfire predictions on the go while planning a trip.   
 
 ```{r app-hist-info, fig.cap="Bushfire Risk Information tab"}
 knitr::include_graphics(here::here("VICfire/data/report/bushfire-risk-info.png"))
@@ -490,6 +496,7 @@ knitr::include_graphics(here::here("VICfire/data/report/shiny_plan.png"))
 ```
 
 Additionally, a rough sketch of bushfire fire risk map in the app is shown above (Figure \@ref(fig:app-pred). It incorporates the random forest model to make predictions of the bushfire risk in a particular cell in real time. Users will be able to toggle the various variables and make forecasts under different scenarios. A detail is that not all cells shown will increase the same amount but instead at a relative rate (by %) to account for the fact that different places have different weather conditions.  
+
 
 
 # Summary and future works
@@ -523,4 +530,4 @@ knitr::include_graphics(here::here("VICfire/data/report/fire_towers.png"))
 ```
 [Source](https://www.firelookoutsdownunder.com/Photos/Victoria/fire_towers_and_lookouts.pdf)
 
-# References
+
