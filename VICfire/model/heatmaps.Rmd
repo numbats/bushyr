@@ -1,0 +1,1089 @@
+---
+title: "heatmaps"
+author: "Helen Evangelina"
+date: "18/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+```{r}
+load(here::here("VICfire/data/ida_report.Rdata"))
+model <- readRDS(here::here("VICfire/model/rfmodel.rds"))
+
+data <- train %>%
+  bind_rows(test)
+
+forest <- data %>% select(id, forest) %>%
+  mutate(id = as.numeric(id))
+
+forest <- forest[!duplicated(forest[,c('id')]),]
+```
+
+```{r}
+# creating a raster for victoria
+vic_raster <- raster(
+  # no. of rows & columns (directly linked to resolution of grid cell)
+  nrows = 20,
+  ncols = 20,
+  
+  # bbox (bounding box of Victoria)
+  xmn = 140.9617,
+  xmx = 149.9763,
+  ymn = -39.13396,
+  ymx = -33.99605,
+  
+  # crs
+  crs = "+proj=longlat +datum=WGS84"
+  )
+vic_raster[] <- 1:ncell(vic_raster)
+
+# creating the lon & lat for each cell id
+lonlat <- as.data.frame(coordinates(vic_raster)) %>%
+  mutate(id = 1:400) %>%
+  mutate(row = (id-1)%/%20 + 1, 
+         col = (id-1)%%20 + 1)
+
+data <- data %>% 
+  mutate(id = as.numeric(id)) %>%
+  left_join(lonlat, by = "id")
+```
+
+```{r}
+data_avg <- data %>%
+  select(-year, fire_count, - forest) %>%
+  group_by(id, month) %>%
+  summarise_all("mean") %>%
+  left_join(forest, by = "id") %>%
+  ungroup() %>%
+  select(-id, -col, -row)
+```
+
+# predictions based on avg values of the data
+```{r}
+predicted <- predict(model, data_avg)$predictions
+
+predicted_data <- data_avg %>% bind_cols(predicted = predicted) %>%
+  select(x, y, month, predicted) %>%
+  left_join(lonlat, by = c("x", "y"))
+```
+
+```{r}
+ggplot(predicted_data) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~month,
+             ncol =3)
+```
+# oct
+```{r}
+oct_plot <- predicted_data %>%
+  filter(month == 10) %>%
+  ggplot() +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void()
+```
+
+# nov
+```{r}
+nov_plot <- predicted_data %>%
+  filter(month == 11) %>%
+  ggplot() +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void()
+```
+
+# dec
+```{r}
+dec_plot <- predicted_data %>%
+  filter(month == 12) %>%
+  ggplot() +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void()
+```
+
+#jan
+```{r}
+jan_plot <- predicted_data %>%
+  filter(month == 1) %>%
+  ggplot() +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void()
+```
+
+# feb
+```{r}
+feb_plot <- predicted_data %>%
+  filter(month == 2) %>%
+  ggplot() +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void()
+```
+
+# mar
+```{r}
+mar_plot <- predicted_data %>%
+  filter(month == 3) %>%
+  ggplot() +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void()
+```
+
+# max_temp
+```{r}
+min(data$max_temp)
+max(data$max_temp)
+```
+14.8-37.8
+
+## oct
+```{r}
+data_oct <- data_avg %>% filter(month == 10) %>%
+  select(-fire_count)
+data_oct_changed <- data.frame()
+for (i in 14:38){
+  temp <- data_oct %>% mutate(max_temp = i)
+  data_oct_changed <- data_oct_changed %>% bind_rows(temp)
+}
+
+predicted_oct_temp <- predict(model, data_oct_changed)$predictions
+
+predicted_data_oct_temp <- data_oct_changed %>% bind_cols(predicted = predicted_oct_temp) %>%
+    select(x, y, max_temp, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_oct_temp <- ggplot(predicted_data_oct_temp) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~max_temp, ncol = 5)
+plot_oct_temp
+```
+
+## nov
+```{r}
+data_nov <- data_avg %>% filter(month == 11) %>%
+  select(-fire_count)
+data_nov_changed <- data.frame()
+for (i in 14:38){
+  temp <- data_nov %>% mutate(max_temp = i)
+  data_nov_changed <- data_nov_changed %>% bind_rows(temp)
+}
+
+predicted_nov_temp <- predict(model, data_nov_changed)$predictions
+
+predicted_data_nov_temp <- data_nov_changed %>% bind_cols(predicted = predicted_nov_temp) %>%
+    select(x, y, max_temp, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_nov_temp <- ggplot(predicted_data_nov_temp) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~max_temp, ncol = 5)
+plot_nov_temp
+```
+
+## dec
+```{r}
+data_dec <- data_avg %>% filter(month == 12) %>%
+  select(-fire_count)
+data_dec_changed <- data.frame()
+for (i in 14:38){
+  temp <- data_dec %>% mutate(max_temp = i)
+  data_dec_changed <- data_dec_changed %>% bind_rows(temp)
+}
+
+predicted_dec_temp <- predict(model, data_dec_changed)$predictions
+
+predicted_data_dec_temp <- data_dec_changed %>% bind_cols(predicted = predicted_dec_temp) %>%
+    select(x, y, max_temp, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_dec_temp <- ggplot(predicted_data_dec_temp) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~max_temp, ncol = 5)
+plot_dec_temp
+```
+
+## jan
+```{r}
+data_jan <- data_avg %>% filter(month == 1) %>%
+  select(-fire_count)
+data_jan_changed <- data.frame()
+for (i in 14:38){
+  temp <- data_jan %>% mutate(max_temp = i)
+  data_jan_changed <- data_jan_changed %>% bind_rows(temp)
+}
+
+predicted_jan_temp <- predict(model, data_jan_changed)$predictions
+
+predicted_data_jan_temp <- data_jan_changed %>% bind_cols(predicted = predicted_jan_temp) %>%
+    select(x, y, max_temp, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_jan_temp <- ggplot(predicted_data_jan_temp) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~max_temp, ncol = 5)
+plot_jan_temp
+```
+
+- checking:
+```{r}
+predicted_data_jan_temp %>%
+  filter(id == 61) %>%
+  ggplot(aes(x = max_temp, 
+             y = predicted)) +
+  geom_line()
+```
+
+```{r}
+predicted_data_jan_temp %>%
+  filter(id == 272) %>%
+  ggplot(aes(x = max_temp, 
+             y = predicted)) +
+  geom_line()
+```
+
+max_temp for 272 in the training set is 28
+
+## feb
+```{r}
+data_feb <- data_avg %>% filter(month == 2) %>%
+  select(-fire_count)
+data_feb_changed <- data.frame()
+for (i in 14:38){
+  temp <- data_feb %>% mutate(max_temp = i)
+  data_feb_changed <- data_feb_changed %>% bind_rows(temp)
+}
+
+predicted_feb_temp <- predict(model, data_feb_changed)$predictions
+
+predicted_data_feb_temp <- data_feb_changed %>% bind_cols(predicted = predicted_feb_temp) %>%
+    select(x, y, max_temp, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_feb_temp <- ggplot(predicted_data_feb_temp) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~max_temp, ncol = 5)
+plot_feb_temp
+```
+
+## mar
+```{r}
+data_mar <- data_avg %>% filter(month == 3) %>%
+  select(-fire_count)
+data_mar_changed <- data.frame()
+for (i in 14:38){
+  temp <- data_mar %>% mutate(max_temp = i)
+  data_mar_changed <- data_mar_changed %>% bind_rows(temp)
+}
+
+predicted_mar_temp <- predict(model, data_mar_changed)$predictions
+
+predicted_data_mar_temp <- data_mar_changed %>% bind_cols(predicted = predicted_mar_temp) %>%
+    select(x, y, max_temp, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_mar_temp <- ggplot(predicted_data_mar_temp) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~max_temp, ncol = 5)
+plot_mar_temp
+```
+
+# radiation
+```{r}
+min(data$radiation)
+max(data$radiation)
+```
+10 - 31
+
+## oct
+```{r}
+data_oct_changed_rad <- data.frame()
+for (i in 11:28){
+  temp <- data_oct %>% mutate(radiation = i)
+  data_oct_changed_rad <- data_oct_changed_rad %>% bind_rows(temp)
+}
+
+predicted_oct_rad <- predict(model, data_oct_changed_rad)$predictions
+
+predicted_data_oct_rad <- data_oct_changed_rad %>% bind_cols(predicted = predicted_oct_rad) %>%
+    select(x, y, radiation, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_oct_rad <- ggplot(predicted_data_oct_rad) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~radiation, ncol = 5)
+plot_oct_rad
+```
+
+## nov
+```{r}
+data_nov_changed_rad <- data.frame()
+for (i in 11:28){
+  temp <- data_nov %>% mutate(radiation = i)
+  data_nov_changed_rad <- data_nov_changed_rad %>% bind_rows(temp)
+}
+
+predicted_nov_rad <- predict(model, data_nov_changed_rad)$predictions
+
+predicted_data_nov_rad <- data_nov_changed_rad %>% bind_cols(predicted = predicted_nov_rad) %>%
+    select(x, y, radiation, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_nov_rad <- ggplot(predicted_data_nov_rad) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~radiation, ncol = 5)
+plot_nov_rad
+```
+
+```{r}
+predicted_data_nov_rad %>%
+  filter(id == 61) %>%
+  ggplot(aes(x = radiation, 
+             y = predicted)) +
+  geom_line()
+```
+
+## dec
+```{r}
+data_dec_changed_rad <- data.frame()
+for (i in 11:28){
+  temp <- data_dec %>% mutate(radiation = i)
+  data_dec_changed_rad <- data_dec_changed_rad %>% bind_rows(temp)
+}
+
+predicted_dec_rad <- predict(model, data_dec_changed_rad)$predictions
+
+predicted_data_dec_rad <- data_dec_changed_rad %>% bind_cols(predicted = predicted_dec_rad) %>%
+    select(x, y, radiation, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_dec_rad <- ggplot(predicted_data_dec_rad) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~radiation, ncol = 5)
+plot_dec_rad
+```
+
+## jan
+```{r}
+data_jan_changed_rad <- data.frame()
+for (i in 11:28){
+  temp <- data_jan %>% mutate(radiation = i)
+  data_jan_changed_rad <- data_jan_changed_rad %>% bind_rows(temp)
+}
+
+predicted_jan_rad <- predict(model, data_jan_changed_rad)$predictions
+
+predicted_data_jan_rad <- data_jan_changed_rad %>% bind_cols(predicted = predicted_jan_rad) %>%
+    select(x, y, radiation, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_jan_rad <- ggplot(predicted_data_jan_rad) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~radiation, ncol = 5)
+plot_jan_rad
+```
+
+## feb
+```{r}
+data_feb_changed_rad <- data.frame()
+for (i in 11:28){
+  temp <- data_feb %>% mutate(radiation = i)
+  data_feb_changed_rad <- data_feb_changed_rad %>% bind_rows(temp)
+}
+
+predicted_feb_rad <- predict(model, data_feb_changed_rad)$predictions
+
+predicted_data_feb_rad <- data_feb_changed_rad %>% bind_cols(predicted = predicted_feb_rad) %>%
+    select(x, y, radiation, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_feb_rad <- ggplot(predicted_data_feb_rad) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~radiation, ncol = 5)
+plot_feb_rad
+```
+
+## mar
+```{r}
+data_mar_changed_rad <- data.frame()
+for (i in 11:28){
+  temp <- data_mar %>% mutate(radiation = i)
+  data_mar_changed_rad <- data_mar_changed_rad %>% bind_rows(temp)
+}
+
+predicted_mar_rad <- predict(model, data_mar_changed_rad)$predictions
+
+predicted_data_mar_rad <- data_mar_changed_rad %>% bind_cols(predicted = predicted_mar_rad) %>%
+    select(x, y, radiation, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_mar_rad <- ggplot(predicted_data_mar_rad) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~radiation, ncol = 5)
+plot_mar_rad
+```
+
+# daily_rain
+```{r}
+min(data$daily_rain)
+max(data$daily_rain)
+```
+
+## oct
+```{r}
+data_oct_changed_rain <- data.frame()
+for (i in 0:8){
+  temp <- data_oct %>% mutate(daily_rain = i)
+  data_oct_changed_rain <- data_oct_changed_rain %>% bind_rows(temp)
+}
+
+predicted_oct_rain <- predict(model, data_oct_changed_rain)$predictions
+
+predicted_data_oct_rain <- data_oct_changed_rain %>% bind_cols(predicted = predicted_oct_rain) %>%
+    select(x, y, daily_rain, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_oct_rain <- ggplot(predicted_data_oct_rain) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~daily_rain, ncol = 3)
+plot_oct_rain
+```
+
+## nov
+```{r}
+data_nov_changed_rain <- data.frame()
+for (i in 0:8){
+  temp <- data_nov %>% mutate(daily_rain = i)
+  data_nov_changed_rain <- data_nov_changed_rain %>% bind_rows(temp)
+}
+
+predicted_nov_rain <- predict(model, data_nov_changed_rain)$predictions
+
+predicted_data_nov_rain <- data_nov_changed_rain %>% bind_cols(predicted = predicted_nov_rain) %>%
+    select(x, y, daily_rain, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_nov_rain <- ggplot(predicted_data_nov_rain) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~daily_rain, ncol = 3)
+plot_nov_rain
+```
+
+## dec
+```{r}
+data_dec_changed_rain <- data.frame()
+for (i in 0:8){
+  temp <- data_dec %>% mutate(daily_rain = i)
+  data_dec_changed_rain <- data_dec_changed_rain %>% bind_rows(temp)
+}
+
+predicted_dec_rain <- predict(model, data_dec_changed_rain)$predictions
+
+predicted_data_dec_rain <- data_dec_changed_rain %>% bind_cols(predicted = predicted_dec_rain) %>%
+    select(x, y, daily_rain, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_dec_rain <- ggplot(predicted_data_dec_rain) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~daily_rain, ncol = 3)
+plot_dec_rain
+```
+
+## jan
+```{r}
+data_jan_changed_rain <- data.frame()
+for (i in 0:8){
+  temp <- data_jan %>% mutate(daily_rain = i)
+  data_jan_changed_rain <- data_jan_changed_rain %>% bind_rows(temp)
+}
+
+predicted_jan_rain <- predict(model, data_jan_changed_rain)$predictions
+
+predicted_data_jan_rain <- data_jan_changed_rain %>% bind_cols(predicted = predicted_jan_rain) %>%
+    select(x, y, daily_rain, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_jan_rain <- ggplot(predicted_data_jan_rain) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~daily_rain, ncol = 3)
+plot_jan_rain
+```
+
+## feb
+```{r}
+data_feb_changed_rain <- data.frame()
+for (i in 0:8){
+  temp <- data_feb %>% mutate(daily_rain = i)
+  data_feb_changed_rain <- data_feb_changed_rain %>% bind_rows(temp)
+}
+
+predicted_feb_rain <- predict(model, data_feb_changed_rain)$predictions
+
+predicted_data_feb_rain <- data_feb_changed_rain %>% bind_cols(predicted = predicted_feb_rain) %>%
+    select(x, y, daily_rain, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_feb_rain <- ggplot(predicted_data_feb_rain) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~daily_rain, ncol = 3)
+plot_feb_rain
+```
+
+## mar
+```{r}
+data_mar_changed_rain <- data.frame()
+for (i in 0:8){
+  temp <- data_mar %>% mutate(daily_rain = i)
+  data_mar_changed_rain <- data_mar_changed_rain %>% bind_rows(temp)
+}
+
+predicted_mar_rain <- predict(model, data_mar_changed_rain)$predictions
+
+predicted_data_mar_rain <- data_mar_changed_rain %>% bind_cols(predicted = predicted_mar_rain) %>%
+    select(x, y, daily_rain, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_mar_rain <- ggplot(predicted_data_mar_rain) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~daily_rain, ncol = 3)
+plot_mar_rain
+```
+
+# et_short_crop
+```{r}
+min(data$et_short_crop)
+max(data$et_short_crop)
+```
+
+## oct
+```{r}
+data_oct_changed_et <- data.frame()
+for (i in 2:8){
+  temp <- data_oct %>% mutate(et_short_crop = i)
+  data_oct_changed_et <- data_oct_changed_et %>% bind_rows(temp)
+}
+
+predicted_oct_et <- predict(model, data_oct_changed_et)$predictions
+
+predicted_data_oct_et <- data_oct_changed_et %>% bind_cols(predicted = predicted_oct_et) %>%
+    select(x, y, et_short_crop, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_oct_et <- ggplot(predicted_data_oct_et) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~et_short_crop, ncol = 3)
+plot_oct_et
+```
+
+## nov
+```{r}
+data_nov_changed_et <- data.frame()
+for (i in 2:8){
+  temp <- data_nov %>% mutate(et_short_crop = i)
+  data_nov_changed_et <- data_nov_changed_et %>% bind_rows(temp)
+}
+
+predicted_nov_et <- predict(model, data_nov_changed_et)$predictions
+
+predicted_data_nov_et <- data_nov_changed_et %>% bind_cols(predicted = predicted_nov_et) %>%
+    select(x, y, et_short_crop, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_nov_et <- ggplot(predicted_data_nov_et) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~et_short_crop, ncol = 3)
+plot_nov_et
+```
+
+## dec
+```{r}
+data_dec_changed_et <- data.frame()
+for (i in 2:8){
+  temp <- data_dec %>% mutate(et_short_crop = i)
+  data_dec_changed_et <- data_dec_changed_et %>% bind_rows(temp)
+}
+
+predicted_dec_et <- predict(model, data_dec_changed_et)$predictions
+
+predicted_data_dec_et <- data_dec_changed_et %>% bind_cols(predicted = predicted_dec_et) %>%
+    select(x, y, et_short_crop, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_dec_et <- ggplot(predicted_data_dec_et) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~et_short_crop, ncol = 3)
+plot_dec_et
+```
+
+## jan
+```{r}
+data_jan_changed_et <- data.frame()
+for (i in 2:8){
+  temp <- data_jan %>% mutate(et_short_crop = i)
+  data_jan_changed_et <- data_jan_changed_et %>% bind_rows(temp)
+}
+
+predicted_jan_et <- predict(model, data_jan_changed_et)$predictions
+
+predicted_data_jan_et <- data_jan_changed_et %>% bind_cols(predicted = predicted_jan_et) %>%
+    select(x, y, et_short_crop, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_jan_et <- ggplot(predicted_data_jan_et) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~et_short_crop, ncol = 3)
+plot_jan_et
+```
+
+## feb
+```{r}
+data_feb_changed_et <- data.frame()
+for (i in 2:8){
+  temp <- data_feb %>% mutate(et_short_crop = i)
+  data_feb_changed_et <- data_feb_changed_et %>% bind_rows(temp)
+}
+
+predicted_feb_et <- predict(model, data_feb_changed_et)$predictions
+
+predicted_data_feb_et <- data_feb_changed_et %>% bind_cols(predicted = predicted_feb_et) %>%
+    select(x, y, et_short_crop, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_feb_et <- ggplot(predicted_data_feb_et) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~et_short_crop, ncol = 3)
+plot_feb_et
+```
+
+## mar
+```{r}
+data_mar_changed_et <- data.frame()
+for (i in 2:8){
+  temp <- data_mar %>% mutate(et_short_crop = i)
+  data_mar_changed_et <- data_mar_changed_et %>% bind_rows(temp)
+}
+
+predicted_mar_et <- predict(model, data_mar_changed_et)$predictions
+
+predicted_data_mar_et <- data_mar_changed_et %>% bind_cols(predicted = predicted_mar_et) %>%
+    select(x, y, et_short_crop, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_mar_et <- ggplot(predicted_data_mar_et) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~et_short_crop, ncol = 3)
+plot_mar_et
+```
+
+# rh
+```{r}
+min(data$rh)
+max(data$rh)
+```
+
+## oct
+```{r}
+data_oct_changed_rh <- data.frame()
+for (i in seq(from = 20, to = 70, by = 5)){
+  temp <- data_oct %>% mutate(rh = i)
+  data_oct_changed_rh <- data_oct_changed_rh %>% bind_rows(temp)
+}
+
+predicted_oct_rh <- predict(model, data_oct_changed_rh)$predictions
+
+predicted_data_oct_rh <- data_oct_changed_rh %>% bind_cols(predicted = predicted_oct_rh) %>%
+    select(x, y, rh, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_oct_rh <- ggplot(predicted_data_oct_rh) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~rh, ncol = 3)
+plot_oct_rh
+```
+
+## nov
+```{r}
+data_nov_changed_rh <- data.frame()
+for (i in seq(from = 20, to = 70, by = 5)){
+  temp <- data_nov %>% mutate(rh = i)
+  data_nov_changed_rh <- data_nov_changed_rh %>% bind_rows(temp)
+}
+
+predicted_nov_rh <- predict(model, data_nov_changed_rh)$predictions
+
+predicted_data_nov_rh <- data_nov_changed_rh %>% bind_cols(predicted = predicted_nov_rh) %>%
+    select(x, y, rh, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_nov_rh <- ggplot(predicted_data_nov_rh) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~rh, ncol = 3)
+plot_nov_rh
+```
+
+## dec
+```{r}
+data_dec_changed_rh <- data.frame()
+for (i in seq(from = 20, to = 70, by = 5)){
+  temp <- data_dec %>% mutate(rh = i)
+  data_dec_changed_rh <- data_dec_changed_rh %>% bind_rows(temp)
+}
+
+predicted_dec_rh <- predict(model, data_dec_changed_rh)$predictions
+
+predicted_data_dec_rh <- data_dec_changed_rh %>% bind_cols(predicted = predicted_dec_rh) %>%
+    select(x, y, rh, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_dec_rh <- ggplot(predicted_data_dec_rh) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~rh, ncol = 3)
+plot_dec_rh
+```
+
+## jan
+```{r}
+data_jan_changed_rh <- data.frame()
+for (i in seq(from = 20, to = 70, by = 5)){
+  temp <- data_jan %>% mutate(rh = i)
+  data_jan_changed_rh <- data_jan_changed_rh %>% bind_rows(temp)
+}
+
+predicted_jan_rh <- predict(model, data_jan_changed_rh)$predictions
+
+predicted_data_jan_rh <- data_jan_changed_rh %>% bind_cols(predicted = predicted_jan_rh) %>%
+    select(x, y, rh, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_jan_rh <- ggplot(predicted_data_jan_rh) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~rh, ncol = 3)
+plot_jan_rh
+```
+
+## feb
+```{r}
+data_feb_changed_rh <- data.frame()
+for (i in seq(from = 20, to = 70, by = 5)){
+  temp <- data_feb %>% mutate(rh = i)
+  data_feb_changed_rh <- data_feb_changed_rh %>% bind_rows(temp)
+}
+
+predicted_feb_rh <- predict(model, data_feb_changed_rh)$predictions
+
+predicted_data_feb_rh <- data_feb_changed_rh %>% bind_cols(predicted = predicted_feb_rh) %>%
+    select(x, y, rh, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_feb_rh <- ggplot(predicted_data_feb_rh) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~rh, ncol = 3)
+plot_feb_rh
+```
+
+## mar
+```{r}
+data_mar_changed_rh <- data.frame()
+for (i in seq(from = 20, to = 70, by = 5)){
+  temp <- data_mar %>% mutate(rh = i)
+  data_mar_changed_rh <- data_mar_changed_rh %>% bind_rows(temp)
+}
+
+predicted_mar_rh <- predict(model, data_mar_changed_rh)$predictions
+
+predicted_data_mar_rh <- data_mar_changed_rh %>% bind_cols(predicted = predicted_mar_rh) %>%
+    select(x, y, rh, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_mar_rh <- ggplot(predicted_data_mar_rh) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~rh, ncol = 3)
+plot_mar_rh
+```
+
+# si10
+```{r}
+min(data$si10)
+max(data$si10)
+```
+
+## oct
+```{r}
+data_oct_changed_si <- data.frame()
+for (i in 1:10){
+  temp <- data_oct %>% mutate(si10 = i)
+  data_oct_changed_si <- data_oct_changed_si %>% bind_rows(temp)
+}
+
+predicted_oct_si <- predict(model, data_oct_changed_si)$predictions
+
+predicted_data_oct_si <- data_oct_changed_si %>% bind_cols(predicted = predicted_oct_si) %>%
+    select(x, y, si10, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_oct_si <- ggplot(predicted_data_oct_si) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~si10, ncol = 3)
+plot_oct_si
+```
+
+# lai_lv
+```{r}
+min(data$lai_lv)
+max(data$lai_lv)
+```
+
+## oct
+```{r}
+data_oct_changed_lv <- data.frame()
+for (i in seq(from = -0.5,  to = 3, by = 0.5)){
+  temp <- data_oct %>% mutate(lai_lv = i)
+  data_oct_changed_lv <- data_oct_changed_lv %>% bind_rows(temp)
+}
+
+predicted_oct_lv <- predict(model, data_oct_changed_lv)$predictions
+
+predicted_data_oct_lv <- data_oct_changed_lv %>% bind_cols(predicted = predicted_oct_lv) %>%
+    select(x, y, lai_lv, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_oct_lv <- ggplot(predicted_data_oct_lv) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~lai_lv, ncol = 3)
+plot_oct_lv
+```
+
+## jan
+```{r}
+data_jan_changed_lv <- data.frame()
+for (i in seq(from = -0.5,  to = 3, by = 0.5)){
+  temp <- data_jan %>% mutate(lai_lv = i)
+  data_jan_changed_lv <- data_jan_changed_lv %>% bind_rows(temp)
+}
+
+predicted_jan_lv <- predict(model, data_jan_changed_lv)$predictions
+
+predicted_data_jan_lv <- data_jan_changed_lv %>% bind_cols(predicted = predicted_jan_lv) %>%
+    select(x, y, lai_lv, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_jan_lv <- ggplot(predicted_data_jan_lv) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~lai_lv, ncol = 3)
+plot_jan_lv
+```
+
+# lai_hv
+```{r}
+min(data$lai_hv)
+max(data$lai_hv)
+```
+
+## oct
+```{r}
+data_oct_changed_hv <- data.frame()
+for (i in seq(from = -0.5,  to = 5, by = 0.5)){
+  temp <- data_oct %>% mutate(lai_hv = i)
+  data_oct_changed_hv <- data_oct_changed_hv %>% bind_rows(temp)
+}
+
+predicted_oct_hv <- predict(model, data_oct_changed_hv)$predictions
+
+predicted_data_oct_hv <- data_oct_changed_hv %>% bind_cols(predicted = predicted_oct_hv) %>%
+    select(x, y, lai_hv, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_oct_hv <- ggplot(predicted_data_oct_hv) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~lai_hv, ncol = 3)
+plot_oct_hv
+```
+
+# s0_pct
+```{r}
+min(data$s0_pct)
+max(data$s0_pct)
+```
+
+## oct
+```{r}
+data_oct_changed_s0 <- data.frame()
+for (i in seq(from = 0.0009,  to = 0.14, by = 0.01)){
+  temp <- data_oct %>% mutate(s0_pct = i)
+  data_oct_changed_s0 <- data_oct_changed_s0 %>% bind_rows(temp)
+}
+
+predicted_oct_s0 <- predict(model, data_oct_changed_s0)$predictions
+
+predicted_data_oct_s0 <- data_oct_changed_s0 %>% bind_cols(predicted = predicted_oct_s0) %>%
+    select(x, y, s0_pct, predicted) %>%
+    left_join(lonlat, by = c("x", "y"))
+  
+plot_oct_s0 <- ggplot(predicted_data_oct_s0) +
+  geom_tile(aes(y = row, 
+                x = col, 
+                fill = predicted)) +
+  scale_fill_distiller(palette = "YlOrBr", direction = 1) + 
+  theme_void() +
+  facet_wrap(~s0_pct, ncol = 3)
+plot_oct_s0
+```

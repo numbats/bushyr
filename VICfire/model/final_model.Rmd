@@ -29,7 +29,7 @@ library(plotly)
 # --- load relevant variables 
 load(here::here("VICfire/data/eda_report.Rdata"))
 load(here::here("VICfire/data/ida_report.Rdata"))
-load(here::here("Report/data/report_data.Rdata"))
+load(here::here("VICfire/data/report_data.Rdata"))
 ```
 
 
@@ -410,6 +410,11 @@ tmap_arrange( test_actual_oct, test_pred_oct,
               test_actual_mar, test_pred_mar, nrow = 3, ncol = 4)
 ```
 
+## writing model object
+```{r}
+saveRDS(randomforest1, "rfmodel.rds")
+model <- readRDS("rfmodel.rds")
+```
 
 
 - comparison for pred and actual values
