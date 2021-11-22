@@ -12,10 +12,13 @@ library(tidyverse)
 
 ```{r}
 load(here::here("VICfire/data/ida_report.Rdata"))
-model <- readRDS(here::here("VICfire/model/rfmodel.rds"))
+model <- readRDS(here::here("VICfire/model/rfmodel_final.rds"))
 
-data <- train %>%
-  bind_rows(test)
+data <- read.csv(here::here("VICfire/data/model_df2.csv")) %>%
+  na.omit()
+
+#data <- train %>%
+#  bind_rows(test)
 
 forest <- data %>% select(id, forest) %>%
   mutate(id = as.numeric(id))
@@ -48,9 +51,11 @@ lonlat <- as.data.frame(coordinates(vic_raster)) %>%
          col = (id-1)%%20 + 1)
 
 data <- data %>% 
+  select(-x, -y) %>%
   mutate(id = as.numeric(id)) %>%
   left_join(lonlat, by = "id")
 ```
+
 
 ```{r}
 data_avg <- data %>%
@@ -165,7 +170,7 @@ max(data$max_temp)
 data_oct <- data_avg %>% filter(month == 10) %>%
   select(-fire_count)
 data_oct_changed <- data.frame()
-for (i in 14:38){
+for (i in 12:38){
   temp <- data_oct %>% mutate(max_temp = i)
   data_oct_changed <- data_oct_changed %>% bind_rows(temp)
 }
@@ -191,7 +196,7 @@ plot_oct_temp
 data_nov <- data_avg %>% filter(month == 11) %>%
   select(-fire_count)
 data_nov_changed <- data.frame()
-for (i in 14:38){
+for (i in 12:38){
   temp <- data_nov %>% mutate(max_temp = i)
   data_nov_changed <- data_nov_changed %>% bind_rows(temp)
 }
@@ -217,7 +222,7 @@ plot_nov_temp
 data_dec <- data_avg %>% filter(month == 12) %>%
   select(-fire_count)
 data_dec_changed <- data.frame()
-for (i in 14:38){
+for (i in 12:38){
   temp <- data_dec %>% mutate(max_temp = i)
   data_dec_changed <- data_dec_changed %>% bind_rows(temp)
 }
@@ -243,7 +248,7 @@ plot_dec_temp
 data_jan <- data_avg %>% filter(month == 1) %>%
   select(-fire_count)
 data_jan_changed <- data.frame()
-for (i in 14:38){
+for (i in 12:38){
   temp <- data_jan %>% mutate(max_temp = i)
   data_jan_changed <- data_jan_changed %>% bind_rows(temp)
 }
@@ -288,7 +293,7 @@ max_temp for 272 in the training set is 28
 data_feb <- data_avg %>% filter(month == 2) %>%
   select(-fire_count)
 data_feb_changed <- data.frame()
-for (i in 14:38){
+for (i in 12:38){
   temp <- data_feb %>% mutate(max_temp = i)
   data_feb_changed <- data_feb_changed %>% bind_rows(temp)
 }
@@ -314,7 +319,7 @@ plot_feb_temp
 data_mar <- data_avg %>% filter(month == 3) %>%
   select(-fire_count)
 data_mar_changed <- data.frame()
-for (i in 14:38){
+for (i in 12:38){
   temp <- data_mar %>% mutate(max_temp = i)
   data_mar_changed <- data_mar_changed %>% bind_rows(temp)
 }

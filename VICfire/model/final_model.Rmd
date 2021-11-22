@@ -32,6 +32,10 @@ load(here::here("VICfire/data/ida_report.Rdata"))
 load(here::here("VICfire/data/report_data.Rdata"))
 ```
 
+```{r}
+data <- read.csv(here::here("VICfire/data/model_df2.csv"))
+```
+
 
 ```{r}
 # creating a raster for victoria
@@ -271,6 +275,64 @@ kable(model_summary(truth = test2$fire_count,
 Test MSE: 2.378
 R-squared: 0.227 
 
+### using the new data
+```{r}
+data <- data %>% mutate(id = as.factor(id))
+```
+
+
+```{r}
+data_final <- data %>% 
+  na.omit() %>% 
+  dplyr::select(-year) %>% mutate(month = as.factor(month))
+
+set.seed(2021)
+randomforest_final <- ranger(fire_count ~ .-id, data = data_final, importance = "impurity")
+randomforest_final
+```
+
+```{r test-summary}
+test2 <- test %>%
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-id, -year) %>%
+  mutate(month = as.factor(month))
+
+predicted <- predict(randomforest_final, test2)$predictions
+
+# Function for evaluating model
+model_summary <- function(truth, estimate){
+  
+  df_new <- data.frame(truth = truth,
+                       estimate = estimate)
+  
+  data.frame(RMSE = rmse_vec(truth, estimate),
+             MAE = mae_vec(truth, estimate),
+             "R-Square" = rsq_vec(truth, estimate),
+             check.names = F
+             ) %>% 
+    mutate(MSE = mean((truth - estimate)^2))
+}
+
+kable(model_summary(truth = test2$fire_count,
+           estimate = predicted))
+```
+
+```{r}
+saveRDS(randomforest_final, "rfmodel_final.rds")
+```
+
+### not including month in the mmodel
+```{r}
+set.seed(2021)
+rfmodel <- ranger(fire_count ~ .-id -month, data = train_final, importance = "impurity")
+rfmodel
+```
+
+```{r}
+saveRDS(rfmodel, "rfmodel2.rds")
+```
+
+
 ### features selection
 ```{r}
 set.seed(2021)
@@ -324,6 +386,60 @@ plot_features(explanation1)
 plot_features(explanation2)
 ```
 
+### using the new model
+```{r}
+set.seed(2021)
+data_final2 <- data_final %>% dplyr::select(-fire_count)
+
+explainer <- lime(x = data_final2,
+                  model = randomforest_final) 
+
+# dealing with model_type error
+model_type.randomForest <- function(x){
+  return("regression") # for regression problem
+}
+
+predict_model.randomForest <- function(x, newdata, type = "response") {
+
+    # return prediction value
+    predict(x, newdata) %>% as.data.frame()
+    
+}
+
+# sampling data
+data_low <- data_final %>% filter(fire_count < 5)
+data_high <- data_final %>% filter(fire_count>5)
+
+set.seed(2021)
+lime_sample1 <- sample(1:length(data_low),4)
+lime_sample2 <- sample(1:length(data_high),4)
+
+data_selected1 <- data_low[lime_sample1, ]
+data_selected2 <- data_high[lime_sample2, ]
+data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
+  dplyr::select(-fire_count)
+
+# creating explanation
+explanation <- explain(x = data_selected,
+                       explainer = explainer, 
+                       feature_select = "auto",
+                       n_features = 15)
+
+explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
+explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
+```   
+
+
+```{r plot-features}
+plot_features(explanation1)
+```
+
+
+```{r plot-features2}
+plot_features(explanation2)
+```
+
+
 ### fitting model based on these important variables
 ```{r}
 set.seed(2021)
@@ -374,7 +490,7 @@ we decided to use the untuned model.
 
 
 ```{r}
-varimp <- data.frame(importance = randomforest1$variable.importance)
+varimp <- data.frame(importance = randomforest_final$variable.importance)
 df <- rownames_to_column(varimp, "var")
 df
 ```
@@ -1246,6 +1362,84 @@ ggplot(test_237_2, aes(x = Increase_by,
   geom_point() +
   facet_grid(~month)
 ```
+
+```{r}
+test <- test %>% left_join(lonlat)
+test_predicted <- test %>%
+  bind_cols(pred = predict(randomforest1, test)$predictions)
+
+for (i in 1:10) {
+  temp <- test_237
+  temp$max_temp <- temp$max_temp + i
+  test_predicted <- test_predicted %>% bind_cols(new_pred = predict(randomforest1, temp)$predictions)
+}
+test_predicted2 <- test_predicted %>%
+  ungroup() %>%
+  rename("0" = pred, 
+         "+1" = `new_pred...35`,
+         "+2" = `new_pred...36`,
+         "+3" = new_pred...37,
+         "+4" = new_pred...38,
+         "+5" = new_pred...39,
+         "+6" = new_pred...40, 
+         "+7" = new_pred...41,
+         "+8" = new_pred...42,
+         "+9" = new_pred...43,
+         "+10" = new_pred...44)
+  
+test_predicted2 <- test_predicted2 %>% dplyr::select(month, `0`:`+10`) %>% pivot_longer(2:12, names_to = "Increase_by", values_to = "new_pred" ) %>%
+  mutate(month = factor(month, levels = c(10,11,12,1,2,3)))
+
+ggplot(test_predicted2, aes(x = Increase_by, 
+                       y = new_pred)) +
+  geom_point() +
+  facet_grid(~month)
+```
+
+```{r}
+test_predicted %>%
+  ggplot(aes(x = max_temp,
+             y = pred)) +
+  geom_point() +
+  facet_grid(~month)
+```
+
+```{r}
+test_predicted %>%
+  ggplot(aes(x = max_temp,
+             y = fire_count)) +
+  geom_point() +
+  facet_grid(~month)
+```
+
+```{r}
+test_predicted %>%
+  ggplot(aes(x = daily_rain_2,
+             y = pred)) +
+  geom_point() +
+  facet_grid(~month, scales = "free")
+```
+
+```{r}
+test_predicted %>%
+  ggplot(aes(x = daily_rain_2,
+             y = daily_rain,
+             color = pred)) +
+  geom_point() +
+  facet_wrap(~month, scales = "free") +
+  scale_color_viridis_c() +
+  theme(aspect.ratio = 1)
+```
+
+```{r}
+
+```
+
+
+```{r}
+glimpse(test)
+```
+
 
 - cell 275
 ```{r}
