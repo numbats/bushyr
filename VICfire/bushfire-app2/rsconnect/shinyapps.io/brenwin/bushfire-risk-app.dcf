@@ -1,0 +1,13 @@
+name: bushfire-risk-app
+title: bushfire-risk-app
+username:
+account: brenwin
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 5088422
+bundleId: 5236033
+url: https://brenwin.shinyapps.io/bushfire-risk-app/
+when: 1636544132.69286
+lastSyncTime: 1636544132.69287
+asMultiple: FALSE
+asStatic: FALSE
