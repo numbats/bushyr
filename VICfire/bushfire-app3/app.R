@@ -43,16 +43,61 @@ ui <- fluidPage(
                  radioGroupButtons(
                    inputId = "month_chosen",
                    label = "Choose month",
-                   choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"),
-                   choiceValues = c(10, 11, 12, 1, 2, 3),
+                   choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"), # values shown to users
+                   choiceValues = c(10, 11, 12, 1, 2, 3), # values internal
                    selected = 12,
                    status = "danger"
                  ),
 
-                 # --- user; toggle `max_temp`
+                 # --- user; toggle variable values
+
+                 # `daily_rain`
+                 shinyWidgets::sliderTextInput(inputId = "daily_rain_slider",
+                                               label = "toggle daily rain",
+                                               choices = -100:100,
+                                               selected = 0,
+                                               post = "%"),
+
+                 # `et_short_crop`
+                 shinyWidgets::sliderTextInput(inputId = "et_short_crop_slider",
+                                               label = "toggle evapotranspiration rate",
+                                               choices = -100:100,
+                                               selected = 0,
+                                               post = "%"),
+
+                 # `max_temp`
                  shinyWidgets::sliderTextInput(inputId = "max_temp_slider",
                                                label = "toggle max temperature",
-                                               choices = 1:100)
+                                               choices = -100:100,
+                                               selected = 0,
+                                               post = "%"),
+                 # `radiation`
+                 shinyWidgets::sliderTextInput(inputId = "radiation_slider",
+                                               label = "toggle radiation",
+                                               choices = -100:100,
+                                               selected = 0,
+                                               post = "%"),
+
+                 # `rh`
+                 shinyWidgets::sliderTextInput(inputId = "rh_slider",
+                                               label = "toggle relative humidity",
+                                               choices = -100:100,
+                                               selected = 0,
+                                               post = "%"),
+
+                 # `si10`
+                 shinyWidgets::sliderTextInput(inputId = "si10_slider",
+                                               label = "toggle 10m wind speed",
+                                               choices = -100:100,
+                                               selected = 0,
+                                               post = "%"),
+
+                 # `s0_pct`
+                 shinyWidgets::sliderTextInput(inputId = "s0_pct_slider",
+                                               label = "toggle surface soil moisture",
+                                               choices = -100:100,
+                                               selected = 0,
+                                               post = "%"),
     ),
 
     # === column for leaflet map output
@@ -67,7 +112,9 @@ ui <- fluidPage(
   # ========== DT::datatable ==========
   fluidRow(
     DT::DTOutput("datatable") %>%
-      shinycssloaders::withSpinner()
+      shinycssloaders::withSpinner(),
+
+    shiny::textOutput("test")
   ),
   br(), br(),
 
@@ -136,12 +183,96 @@ server <- function(input, output) {
   # --- based on user selected month; predict avg
   model_df_pred <- shiny::reactive({
 
-    model_df_pred_temp <- model_df2 %>%
+    model_df2_temp <- model_df2 %>%
       na.omit() %>%
+      # select variables; user toggle
+      select(id, year, month, daily_rain:s0_pct,
+             -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
+      pivot_longer(cols = daily_rain:s0_pct,
+                   values_to = "value",
+                   names_to = "var") %>%
+      # for each id & variable
+      group_by(id, var, month) %>%
+      mutate(z = (value - mean(value, na.rm = T)) / sd(value, na.rm = T), # compute z RV
+             mean = mean(value, na.rm = T), # compute mean
+             sd = sd(value, na.rm = T)) # compute sd
+
+    # --- temper variables based on z-scores
+    # 1% = 0.1 sd -> 100% = 10sd
+
+    # `daily_rain`
+    model_df2_temp$value[model_df2_temp$var == "daily_rain"] <- model_df2_temp %>%
+      filter(var == "daily_rain") %>%
+      mutate(z = z + input$daily_rain_slider) %>% # change z values; according to user toggle
+      mutate(z_updated = (z * sd) + mean) %>%
+      pull(z_updated)
+
+    # `et_short_crop`
+    model_df2_temp$value[model_df2_temp$var == "et_short_crop"] <- model_df2_temp %>%
+      filter(var == "et_short_crop") %>%
+      mutate(z = z + input$et_short_crop_slider) %>% # change z values; according to user toggle
+      mutate(z_updated = (z * sd) + mean) %>%
+      pull(z_updated)
+
+    # `max_temp`
+    model_df2_temp$value[model_df2_temp$var == "max_temp"] <- model_df2_temp %>%
+      filter(var == "max_temp") %>%
+      mutate(z = z + input$max_temp_slider) %>% # change z values; according to user toggle
+      mutate(z_updated = (z * sd) + mean) %>%
+      pull(z_updated)
+
+    # `radiation`
+    model_df2_temp$value[model_df2_temp$var == "radiation"] <- model_df2_temp %>%
+      filter(var == "radiation") %>%
+      mutate(z = z + input$radiation_slider) %>% # change z values; according to user toggle
+      mutate(z_updated = (z * sd) + mean) %>%
+      pull(z_updated)
+
+    # `rh`
+    model_df2_temp$value[model_df2_temp$var == "rh"] <- model_df2_temp %>%
+      filter(var == "rh") %>%
+      mutate(z = z + input$rh_slider) %>% # change z values; according to user toggle
+      mutate(z_updated = (z * sd) + mean) %>%
+      pull(z_updated)
+
+
+    # `si10`
+    model_df2_temp$value[model_df2_temp$var == "si10"] <- model_df2_temp %>%
+      filter(var == "si10") %>%
+      mutate(z = z + input$si10_slider) %>% # change z values; according to user toggle
+      mutate(z_updated = (z * sd) + mean) %>%
+      pull(z_updated)
+
+    # `s0_pct`
+    model_df2_temp$value[model_df2_temp$var == "s0_pct"] <- model_df2_temp %>%
+      filter(var == "s0_pct") %>%
+      mutate(z = z + input$s0_pct_slider) %>% # change z values; according to user toggle
+      mutate(z_updated = (z * sd) + mean) %>%
+      pull(z_updated)
+
+    # --- recreate `model_df2` with tampered variables
+    model_df2_temp2 <- model_df2_temp %>%
+      select(id, year, month, var, value) %>%
+      pivot_wider(names_from = var,
+                  values_from = value) %>%
       ungroup() %>%
-      # allow users: choose month
-      dplyr::filter(month == input$month_chosen) %>% # filter to user selected month
-      # make predictions
+      # compute 1st lag
+      mutate(across(.cols = daily_rain:s0_pct,
+                    .fns = ~lag(.x),
+                    .names = "{.col}_1")) %>%
+      # compute 2nd lag
+      mutate(across(.cols = daily_rain:s0_pct,
+                    .fns = ~lag(.x,
+                                n = 2),
+                    .names = "{.col}_2")) %>%
+      na.omit() %>%
+      left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+                                                      forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+                by = c("id", "year", "month")) %>%
+      relocate(fire_count, x, y,
+               .after = "year") %>%
+      filter(month == input$month_chosen) %>%
+      # make predictions with `rf` model
       mutate(pred = predict(model, .)$predictions,
              .after = "fire_count") %>%
       group_by(id) %>%
@@ -155,7 +286,7 @@ server <- function(input, output) {
     vic_raster_crop_sf %>%
       mutate(id = as_factor(id)) %>%
       # join with predicted data
-      left_join(., model_df_pred_temp)
+      left_join(., model_df2_temp2)
   })
 
 
@@ -291,6 +422,7 @@ server <- function(input, output) {
   # --- DT::datatable; based on cell clicked
   output$datatable <- DT::renderDT(
     model_df_pred() %>%
+      sf::st_set_geometry(NULL) %>% # drop geometry column
       DT::datatable(options = list(scrollX = T,
                                    pageLength = 5)) %>%
       DT::formatRound(columns = 2:4,
