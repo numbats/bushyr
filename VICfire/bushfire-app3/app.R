@@ -18,6 +18,7 @@ ignition_rasterize_cluster_bf_season <- ignition_rasterize_cluster_bf_season %>%
 load(here::here("data/ida.RData"))
 load(here::here("data/eda.RData"))
 model <- readRDS(here::here("data/rfmodel_final.rds"))
+model_df2_low_avg_high <- read_csv(here::here("data/model_df2_low_avg_high.csv"))
 
 # --- set spinner colour to red
 options(spinner.color = "#b22222")
@@ -122,20 +123,18 @@ ui <- fluidPage(
 
   # ========== plotly ==========
   fluidRow(
-    # === column for `fire_count` vs. `bf_season` bar plotly
     column(width = 4,
-           plotly::plotlyOutput("fire_bf_season_plotly") %>%
-             shinycssloaders::withSpinner()
-    ),
-
-    column(width = 4,
-           plotly::plotlyOutput("fire_month_plotly") %>%
-             shinycssloaders::withSpinner()
-    ),
+           plotly::plotlyOutput("daily_rain_plotly") %>%
+             shinycssloaders::withSpinner()),
 
     column(width = 4,
            plotly::plotlyOutput("max_temp_plotly") %>%
+             shinycssloaders::withSpinner()),
+
+    column(width = 4,
+           plotly::plotlyOutput("et_short_crop_plotly") %>%
              shinycssloaders::withSpinner())
+
   )
 
 )
@@ -203,35 +202,35 @@ server <- function(input, output) {
     # `daily_rain`
     model_df2_temp$value[model_df2_temp$var == "daily_rain"] <- model_df2_temp %>%
       filter(var == "daily_rain") %>%
-      mutate(z = z + input$daily_rain_slider) %>% # change z values; according to user toggle
+      mutate(z = z + (input$daily_rain_slider * 0.1)) %>% # change z values; according to user toggle
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `et_short_crop`
     model_df2_temp$value[model_df2_temp$var == "et_short_crop"] <- model_df2_temp %>%
       filter(var == "et_short_crop") %>%
-      mutate(z = z + input$et_short_crop_slider) %>% # change z values; according to user toggle
+      mutate(z = z + (input$et_short_crop_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `max_temp`
     model_df2_temp$value[model_df2_temp$var == "max_temp"] <- model_df2_temp %>%
       filter(var == "max_temp") %>%
-      mutate(z = z + input$max_temp_slider) %>% # change z values; according to user toggle
+      mutate(z = z + (input$max_temp_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `radiation`
     model_df2_temp$value[model_df2_temp$var == "radiation"] <- model_df2_temp %>%
       filter(var == "radiation") %>%
-      mutate(z = z + input$radiation_slider) %>% # change z values; according to user toggle
+      mutate(z = z + (input$radiation_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `rh`
     model_df2_temp$value[model_df2_temp$var == "rh"] <- model_df2_temp %>%
       filter(var == "rh") %>%
-      mutate(z = z + input$rh_slider) %>% # change z values; according to user toggle
+      mutate(z = z + (input$rh_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
@@ -239,14 +238,14 @@ server <- function(input, output) {
     # `si10`
     model_df2_temp$value[model_df2_temp$var == "si10"] <- model_df2_temp %>%
       filter(var == "si10") %>%
-      mutate(z = z + input$si10_slider) %>% # change z values; according to user toggle
+      mutate(z = z + (input$si10_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `s0_pct`
     model_df2_temp$value[model_df2_temp$var == "s0_pct"] <- model_df2_temp %>%
       filter(var == "s0_pct") %>%
-      mutate(z = z + input$s0_pct_slider) %>% # change z values; according to user toggle
+      mutate(z = z + (input$s0_pct_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
@@ -415,8 +414,10 @@ server <- function(input, output) {
   # --- df based on user click
   model_df_id <- shiny::eventReactive(input$map_shape_click, { # invalidated; each time; user click grid cell
     # based on user map click
-    model_df3 %>%
-      filter(id == input$map_shape_click$id)
+
+    model_df2_low_avg_high %>% # variable values; low = -10sd // avg.// high = +10 sd
+      filter(id == input$map_shape_click$id,
+             month == input$month_chosen)
   })
 
   # --- DT::datatable; based on cell clicked
@@ -429,107 +430,114 @@ server <- function(input, output) {
                       digits = 3)
   )
 
-  # --- plot `fire_count` vs. `bf_season`; bar plotly
-  output$fire_bf_season_plotly <- plotly::renderPlotly({
+
+  # --- plot variables of low = -10sd// avg.// high = +10sd
+
+  # `daily_rain`
+  output$daily_rain_plotly <- plotly::renderPlotly({
+    # --- e.g. plotly
     model_df_id() %>%
-      # sum fires over bushfire season
-      group_by(bf_season) %>%
-      summarise(fire_count = sum(fire_count)) %>%
-      # plot_ly
-      plotly::plot_ly(x = ~bf_season,
-                      y = ~fire_count,
-                      type = "bar",
-                      text = ~fire_count,
-                      textposition = "auto") %>%
-      plotly::layout(
-        # plot title
-        title = "number of fires ignitions in bushfire season",
-
-        # x-axis
-        xaxis = list(type = "category", # categorical variable
-                     title = "bushfire season"), # axis title
-
-        # y-axis
-        yaxis = list(title = "number of fire ignitions",
-                     type = "numeric",
-                     range = c(0, 40))
-      )
-  })
-
-
-  # --- plot `fire_count` vs. `month`; bar plotly
-  output$fire_month_plotly <- plotly::renderPlotly({
-    model_df_id() %>%
-      group_by(bf_season,
-               month) %>%
-      summarise(fire_count = sum(fire_count)) %>%
-      # wide form (each `month` have own column)
-      pivot_wider(names_from = month,
-                  values_from = fire_count) %>%
-      # plot
-      plot_ly() %>%
-      # add bar for each month
-      add_trace(x = ~bf_season,
-                y = ~`10`,
-                name = "Oct",
-                text = ~`10`,
-                textposition = "outside") %>%
-      add_trace(x = ~bf_season,
-                y = ~`11`,
-                name = "Nov",
-                text = ~`11`,
-                textposition = "outside") %>%
-      add_trace(x = ~bf_season,
-                y = ~`12`,
-                name = "Dec",
-                text = ~`12`,
-                textposition = "outside") %>%
-      add_trace(x = ~bf_season,
-                y = ~`1`,
-                name = "Jan",
-                text = ~`1`,
-                textposition = "outside") %>%
-      add_trace(x = ~bf_season,
-                y = ~`2`,
-                name = "Feb",
-                text = ~`2`,
-                textposition = "outside") %>%
-      add_trace(x = ~bf_season,
-                y = ~`3`,
-                name = "Mar",
-                text = ~`3`,
-                textposition = "outside") %>%
-      plotly::layout(barmode = "group",
-                     title = "fire ignitions against months in bushfire season",
-                     yaxis = list(title = "number of ignitions",
-                                  type = "numeric",
-                                  range = c(0, 40)),
-                     xaxis = list(type = "category",
-                                  title = "bushfire season | months"),
-                     bargap = 0.05,
-                     bargroupgap = 0.25)
-  })
-
-  # --- plot
-  output$max_temp_plotly <- plotly::renderPlotly({
-    model_df_id() %>%
-      # extract date
-      mutate(date = paste(year, month, sep = "") %>% lubridate::ym(),
-             .after = "month") %>%
-      plot_ly(x = ~date,
-              y = ~max_temp,
-              split = ~bf_season,
+      ungroup() %>%
+      mutate(month = factor(month,
+                            levels = c(10, 11, 12, 1, 2, 3))) %>%
+      # add high & low filled
+      plot_ly(data = .,
+              x = ~year,
+              y = ~daily_rain_high,
               type = "scatter",
-              mode = "lines+markers") %>%
-      plotly::layout(title = "max temperature over bushfire season", # title
-                     # set tick labels
-                     xaxis = list(tickformat = "%b\n%Y",
-                                  ticklabelmode = "period",
-                                  dtick = "M12"), # every 12 months
-                     # legend
-                     legend = list(title = list(text = "bushfire_season"))
-      )
+              mode = "lines",
+              line = list(color = 'transparent'),
+              showlegend = FALSE,
+              name = 'High') %>%
+      add_trace(x = ~year,
+                y = ~daily_rain_low,
+                type = 'scatter',
+                mode = 'lines',
+                fill = 'tonexty',
+                fillcolor='rgba(0,100,80,0.2)',
+                line = list(color = 'transparent'),
+                showlegend = FALSE,
+                name = 'Low') %>%
+      # add average line + markers
+      add_trace(x = ~year,
+                y = ~daily_rain_avg,
+                type = 'scatter',
+                mode = 'lines+markers',
+                line = list(color='rgb(0,100,80)'),
+                name = 'Average') %>%
+      layout(yaxis = list(title = "daily_rain"))
   })
+
+  # `max_temp`
+  output$max_temp_plotly <- plotly::renderPlotly({
+    # --- e.g. plotly
+    model_df_id() %>%
+      ungroup() %>%
+      mutate(month = factor(month,
+                            levels = c(10, 11, 12, 1, 2, 3))) %>%
+      # add high & low filled
+      plot_ly(data = .,
+              x = ~year,
+              y = ~max_temp_high,
+              type = "scatter",
+              mode = "lines",
+              line = list(color = 'transparent'),
+              showlegend = FALSE,
+              name = 'High') %>%
+      add_trace(x = ~year,
+                y = ~max_temp_low,
+                type = 'scatter',
+                mode = 'lines',
+                fill = 'tonexty',
+                fillcolor='rgba(0,100,80,0.2)',
+                line = list(color = 'transparent'),
+                showlegend = FALSE,
+                name = 'Low') %>%
+      # add average line + markers
+      add_trace(x = ~year,
+                y = ~max_temp_avg,
+                type = 'scatter',
+                mode = 'lines+markers',
+                line = list(color='rgb(0,100,80)'),
+                name = 'Average') %>%
+      layout(yaxis = list(title = "max_temp"))
+  })
+
+  output$et_short_crop_plotly <- plotly::renderPlotly({
+    # --- e.g. plotly
+    model_df_id() %>%
+      ungroup() %>%
+      mutate(month = factor(month,
+                            levels = c(10, 11, 12, 1, 2, 3))) %>%
+      # add high & low filled
+      plot_ly(data = .,
+              x = ~year,
+              y = ~et_short_crop_high,
+              type = "scatter",
+              mode = "lines",
+              line = list(color = 'transparent'),
+              showlegend = FALSE,
+              name = 'High') %>%
+      add_trace(x = ~year,
+                y = ~et_short_crop_low,
+                type = 'scatter',
+                mode = 'lines',
+                fill = 'tonexty',
+                fillcolor='rgba(0,100,80,0.2)',
+                line = list(color = 'transparent'),
+                showlegend = FALSE,
+                name = 'Low') %>%
+      # add average line + markers
+      add_trace(x = ~year,
+                y = ~et_short_crop_avg,
+                type = 'scatter',
+                mode = 'lines+markers',
+                line = list(color='rgb(0,100,80)'),
+                name = 'Average') %>%
+      layout(yaxis = list(title = "et_short_crop"))
+  })
+
+
 }
 
 # Run the application
