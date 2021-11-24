@@ -474,6 +474,20 @@ Therefore, due to the inherent interplay between the variables, lasso regression
 
 Since ensemble learning with random forest process can deal with these issues, it was deemed suitable in our modelling scenario. Random forests had been used in several studies to model bushfire susceptibility. (@gigovic2019testing) 
 
+## Final Model
+The final model is fitted on all of the data, including the test set, using the `ranger` package due to the much faster computation compared to the `randomforest` package. This model has a 0.42 R-squared and 1.92 of MSE. Summary statistics of the model can be seen on Table \@ref(tab:final-model-summary). 
+
+```{r final-model-summary}
+model <- readRDS(here::here("VICfire/model/rfmodel_final.rds"))
+final_data <- read.csv(here::here("VICfire/data/model_df2.csv")) %>% na.omit()
+
+predictions_final <- model$predictions
+predicted_data_final <-  final_data %>% 
+  bind_cols(predictions = predictions_final)
+kable(model_summary(truth = final_data$fire_count,
+           estimate = predictions_final),
+      caption = "Summary statistics of the final random forest model.")
+```
 
 
 # Shiny Web application (User-Interface)
@@ -482,13 +496,15 @@ The outputs of data processing and bushfire predictions are put together in an a
 
 `RShiny` allows for elegant interactive exploratory plots and updates in real-time for swift decision making. It is also highly customisable to enhance users' interface. Furthermore, it supplies convenience function to assemble the html website in `R` and is easy to deploy. 
 
-The current project builds on the "Fire Risk" Tab. On top of the historical bushfire information and bushfire `cause` prediction, this complementary addition serves to inform users with historical information risk and up-to-date predictions around bushfire risk. We maintained a similar design for the structure of the app- keeping separate tabs for historical information and predictions. This is to cater for different users who might be using the app. Fire personnels might be interested in the weather and landscape variables creating the conducive fire environment. Plots and data are made downloadable. While users would be interested in bushfire predictions on the go while planning a trip.   
+The current project builds on the "Fire Risk" Tab. On top of the historical bushfire information and bushfire `cause` prediction, this complementary addition serves to inform users with historical information risk and up-to-date predictions around bushfire risk. We maintained a similar design for the structure of the app - keeping separate tabs for historical information and predictions. This is to cater for different users who might be using the app. Fire personnels might be interested in the weather and landscape variables creating the conducive fire environment. Plots and data are made downloadable. The github link is also provided in the app to allow users to download the model object and play around with it. While users would be interested in bushfire predictions on the go while planning a trip.   
 
 ```{r app-hist-info, fig.cap="Bushfire Risk Information tab"}
 knitr::include_graphics(here::here("VICfire/data/report/bushfire-risk-info.png"))
 ```
 
-The current state of the historical bushfire risk Information tab is shown above. in Figure \@ref(fig:app-hist-info). User interactivity include choosing the bushfire seasons to overlay ignition points. User can also choose the months to compute number of bushfires from. Upon clicking a grid cell, the data table and plots are produced. The table provides information of the different weather and landscape variables. Plots show the historically the number of bushfires and values of each variable (max temperature in this case) which might be of interest to users. These are made downloadable for interested users. 
+The current state of the historical bushfire risk Information tab is shown in Figure \@ref(fig:app-hist-info). User interactivity includes toggling the values of the variables (max_temp, radiation, rh, et_short_crop, si10, s0_pct, daily_raain, lai_hv). These variables are chosen based on the variable importance using `LIME` package. On the left side of the app is where users can play around with the variables. The changes are based on the standard deviations of each variables for each cell id with a range of -4sd to 4sd (100%? talk more about this). 
+
+User can also choose the months to compute number of bushfires from. Upon clicking a grid cell, the data table and plots are produced. The table provides information of the different weather and landscape variables. Plots show the historically the number of bushfires and values of each variable (max temperature in this case) which might be of interest to users. These are made downloadable for interested users. 
 
 
 ```{r app-pred, fig.cap="rough plan for bushfire risk map"}
@@ -497,12 +513,19 @@ knitr::include_graphics(here::here("VICfire/data/report/shiny_plan.png"))
 
 Additionally, a rough sketch of bushfire fire risk map in the app is shown above (Figure \@ref(fig:app-pred). It incorporates the random forest model to make predictions of the bushfire risk in a particular cell in real time. Users will be able to toggle the various variables and make forecasts under different scenarios. A detail is that not all cells shown will increase the same amount but instead at a relative rate (by %) to account for the fact that different places have different weather conditions.  
 
+# Final insights
+
 
 
 # Summary and future works
-To assess bushfire risk in Victoria, A Shiny web application is developed to help monitor potential fire ignitions using the satellite data. For predicting the risk of fire, different modelling alternatives were explored. This will be used as a prototype to predict the bushfire risk 2021-2022 bushfire season based on weather and landscape conditions. The best model was deemed to be a random forest model which appropriately incorporates various weather and climate variables.  Random forest model outperforms other modelling techniques because random forest is great to capture the non-linear relationship between the response and explanatory variables. Furthermore, random forest handles the multicollinearity structure in the data well. The model gives a training mean squared error of 1.216 and R-squared of 0.396. However, applying the model to the test set results to a slightly lower R-squared and higher MSE. The reason for this might be because the model tends to over-fit the training set, resulting to less accurate predictions for the test set. Additionally, our model tends to under-predict due to a lot of zeros in our data. It is also important to note that the response (fire ignitions) has been erratic going from one year to another. Even though random forest does not provide a perfect prediction, it provides a pretty accurate predictions, especially if looking at the relative counts in proportion-wise. The model predicts cell which have higher observed fires to have higher predicted fires in comparison to other cells. 
+To assess bushfire risk in Victoria, A Shiny web application is developed to help monitor potential fire ignitions using the satellite data. For predicting the risk of fire, different modelling alternatives were explored. This will be used as a prototype to predict the bushfire risk 2021-2022 bushfire season based on weather and landscape conditions. The best model was deemed to be a random forest model which appropriately incorporates various weather and climate variables.  Random forest model outperforms other modelling techniques because random forest is great to capture the non-linear relationship between the response and explanatory variables. Furthermore, random forest handles the multicollinearity structure in the data well. The model gives a training mean squared error of 1.216 and R-squared of 0.396. However, applying the model to the test set results to a slightly lower R-squared and higher MSE. The reason for this might be because the model tends to over-fit the training set, resulting to less accurate predictions for the test set. Additionally, our model tends to under-predict due to a lot of zeros in our data. It is also important to note that the response (fire ignitions) has been erratic going from one year to another. 
 
-Even though more than 80% of fires occur by lightning, another limitation of our model is it uses variables which represent weather conditions, which might not accurately account for accident-based fires.  Some variables that might be useful for predicting the risk of fire, like distance to road are still attempted to be factored in. This could be a consideration for our future work to include more variables. The bushfire risk tab in the application that incorporates the predictions is being worked on.
+The final model is fitted on all of the data, including the test set. This results to a model with 0.42 R-squared and 1.92 MSE. Even though random forest does not provide a perfect prediction, it provides a pretty accurate predictions, especially if looking at the relative counts in proportion-wise. The model predicts cell which have higher observed fires to have higher predicted fires in comparison to other cells. 
+
+Even though more than 80% of fires occur by lightning, another limitation of our model is it uses variables which represent weather conditions, which might not accurately account for accident-based fires.
+Other variables like distance to road is not suitable to be implemented in the model because our work is based on gridded cells and we do not have one specific ignition point. Therefore, we could not really calculate the distances of each grid cells. An alternative would be to treat distance to road as a dummy variable with a value of 1 if the cell consists of road and 0 otherwise. However, most cells contain roads and it is unlikely to be a useful predictor. Other variables that might be useful for predicting the risk of non-lightning caused fires could be further explored and factored in the model. 
+
+Additionally, time of day could be added so that users could choose which time of day they want to present in the app. Cus diff time of day might result to diff bushfire risk. 
 
 
 # Appendix 
