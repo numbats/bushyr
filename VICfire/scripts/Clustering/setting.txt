@@ -1,0 +1,2 @@
+active_time = 24
+adj_distance = 3000
