@@ -10,102 +10,112 @@ library(ranger)
 
 # **************************************** outside app ****************************************
 
-ignition_rasterize_cluster_bf_season <- ignition_rasterize_cluster_bf_season %>%
-  mutate(id = as_factor(id))
-
 
 # ==================== read in data ====================
-load(here::here("data/ida.RData"))
-load(here::here("data/eda.RData"))
-model <- readRDS(here::here("data/rfmodel_final.rds"))
-model_df2_low_avg_high <- read_csv(here::here("data/model_df2_low_avg_high.csv"))
+# load(here::here("data/ida.RData"))
+# load(here::here("data/eda.RData"))
+
+# model_df2_low_avg_high <- read_csv(here::here("data/model_df2_low_avg_high.csv"))
+
+# --- df; with predictors & response; for modelling
+model_df2 <- readr::read_rds("model_df2.rds")
+
+# --- df; with {predictors}_low: -4 sd from mean// {predictors}_avg// {predictors}_high: +4 sd from mean; for plotlys
+model_df2_low_avg_high <- readr::read_rds("model_df2_low_avg_high.rds")
+
+# --- df; with fire ignitions; from 2016 to 2021; for overlaying on map
+cluster_16_21_sf <- readr::read_rds("cluster_16_21_sf.rds")
+
+# --- `ranger` model object; for predictions
+model <- readr::read_rds("rfmodel_final.rds")
+
+
+# **************************************** define UI ****************************************
 
 # --- set spinner colour to red
 options(spinner.color = "#b22222")
 
-
-
-# **************************************** define UI ****************************************
 ui <- fluidPage(
 
+  # --- set background colour
   shinyWidgets::setBackgroundColor(color = "ghostwhite"),
 
-  # add app title
+  # --- app title
   tags$h1("Bushfire Risk Predictions",
           style = "font-family: Impact; color: #1e90ff; font-size: 60px",
           align = "center"),
   br(),
 
   sidebarLayout(
-    # === column for user interactivity
-    sidebarPanel(width = 2,
+    # === sidebarPanel for user interactivity
+    shiny::sidebarPanel(width = 2,
 
-                 # --- user; choose month
-                 radioGroupButtons(
-                   inputId = "month_chosen",
-                   label = "Choose month",
-                   choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"), # values shown to users
-                   choiceValues = c(10, 11, 12, 1, 2, 3), # values internal
-                   selected = 12,
-                   status = "danger"
-                 ),
+                        # --- user; choose month
+                        radioGroupButtons(
+                          inputId = "month_chosen",
+                          label = "Choose month",
+                          choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"), # values shown to users
+                          choiceValues = c(10, 11, 12, 1, 2, 3), # values internal
+                          selected = 12,
+                          status = "danger"
+                        ),
 
-                 # --- user; toggle variable values
+                        # --- user; toggle variable values
 
-                 # `daily_rain`
-                 shinyWidgets::sliderTextInput(inputId = "daily_rain_slider",
-                                               label = "toggle daily rain",
-                                               choices = -100:100,
-                                               selected = 0,
-                                               post = "%"),
+                        # `daily_rain`
+                        shinyWidgets::sliderTextInput(inputId = "daily_rain_slider",
+                                                      label = "toggle daily rain",
+                                                      choices = -100:100,
+                                                      selected = 0,
+                                                      post = "%"),
 
-                 # `et_short_crop`
-                 shinyWidgets::sliderTextInput(inputId = "et_short_crop_slider",
-                                               label = "toggle evapotranspiration rate",
-                                               choices = -100:100,
-                                               selected = 0,
-                                               post = "%"),
+                        # `et_short_crop`
+                        shinyWidgets::sliderTextInput(inputId = "et_short_crop_slider",
+                                                      label = "toggle evapotranspiration rate",
+                                                      choices = -100:100,
+                                                      selected = 0,
+                                                      post = "%"),
 
-                 # `max_temp`
-                 shinyWidgets::sliderTextInput(inputId = "max_temp_slider",
-                                               label = "toggle max temperature",
-                                               choices = -100:100,
-                                               selected = 0,
-                                               post = "%"),
-                 # `radiation`
-                 shinyWidgets::sliderTextInput(inputId = "radiation_slider",
-                                               label = "toggle radiation",
-                                               choices = -100:100,
-                                               selected = 0,
-                                               post = "%"),
+                        # `max_temp`
+                        shinyWidgets::sliderTextInput(inputId = "max_temp_slider",
+                                                      label = "toggle max temperature",
+                                                      choices = -100:100,
+                                                      selected = 0,
+                                                      post = "%"),
+                        # `radiation`
+                        shinyWidgets::sliderTextInput(inputId = "radiation_slider",
+                                                      label = "toggle radiation",
+                                                      choices = -100:100,
+                                                      selected = 0,
+                                                      post = "%"),
 
-                 # `rh`
-                 shinyWidgets::sliderTextInput(inputId = "rh_slider",
-                                               label = "toggle relative humidity",
-                                               choices = -100:100,
-                                               selected = 0,
-                                               post = "%"),
+                        # `rh`
+                        shinyWidgets::sliderTextInput(inputId = "rh_slider",
+                                                      label = "toggle relative humidity",
+                                                      choices = -100:100,
+                                                      selected = 0,
+                                                      post = "%"),
 
-                 # `si10`
-                 shinyWidgets::sliderTextInput(inputId = "si10_slider",
-                                               label = "toggle 10m wind speed",
-                                               choices = -100:100,
-                                               selected = 0,
-                                               post = "%"),
+                        # `si10`
+                        shinyWidgets::sliderTextInput(inputId = "si10_slider",
+                                                      label = "toggle 10m wind speed",
+                                                      choices = -100:100,
+                                                      selected = 0,
+                                                      post = "%"),
 
-                 # `s0_pct`
-                 shinyWidgets::sliderTextInput(inputId = "s0_pct_slider",
-                                               label = "toggle surface soil moisture",
-                                               choices = -100:100,
-                                               selected = 0,
-                                               post = "%"),
+                        # `s0_pct`
+                        shinyWidgets::sliderTextInput(inputId = "s0_pct_slider",
+                                                      label = "toggle surface soil moisture",
+                                                      choices = -100:100,
+                                                      selected = 0,
+                                                      post = "%")
     ),
 
-    # === column for leaflet map output
-    mainPanel(width = 10,
-              leaflet::leafletOutput("map",
-                                     height = 500) %>%
-                shinycssloaders::withSpinner()
+    # === mainPanel for leaflet map
+    shiny::mainPanel(width = 10,
+                     leaflet::leafletOutput("map",
+                                            height = 500) %>%
+                       shinycssloaders::withSpinner()
     )
   ),
   br(), br(),
@@ -114,8 +124,6 @@ ui <- fluidPage(
   fluidRow(
     DT::DTOutput("datatable") %>%
       shinycssloaders::withSpinner(),
-
-    shiny::textOutput("test")
   ),
   br(), br(),
 
@@ -202,35 +210,35 @@ server <- function(input, output) {
     # `daily_rain`
     model_df2_temp$value[model_df2_temp$var == "daily_rain"] <- model_df2_temp %>%
       filter(var == "daily_rain") %>%
-      mutate(z = z + (input$daily_rain_slider * 0.1)) %>% # change z values; according to user toggle
+      mutate(z = z + (input$daily_rain_slider * 0.04)) %>% # change z values; according to user toggle
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `et_short_crop`
     model_df2_temp$value[model_df2_temp$var == "et_short_crop"] <- model_df2_temp %>%
       filter(var == "et_short_crop") %>%
-      mutate(z = z + (input$et_short_crop_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
+      mutate(z = z + (input$et_short_crop_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `max_temp`
     model_df2_temp$value[model_df2_temp$var == "max_temp"] <- model_df2_temp %>%
       filter(var == "max_temp") %>%
-      mutate(z = z + (input$max_temp_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
+      mutate(z = z + (input$max_temp_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `radiation`
     model_df2_temp$value[model_df2_temp$var == "radiation"] <- model_df2_temp %>%
       filter(var == "radiation") %>%
-      mutate(z = z + (input$radiation_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
+      mutate(z = z + (input$radiation_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `rh`
     model_df2_temp$value[model_df2_temp$var == "rh"] <- model_df2_temp %>%
       filter(var == "rh") %>%
-      mutate(z = z + (input$rh_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
+      mutate(z = z + (input$rh_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
@@ -238,14 +246,14 @@ server <- function(input, output) {
     # `si10`
     model_df2_temp$value[model_df2_temp$var == "si10"] <- model_df2_temp %>%
       filter(var == "si10") %>%
-      mutate(z = z + (input$si10_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
+      mutate(z = z + (input$si10_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
     # `s0_pct`
     model_df2_temp$value[model_df2_temp$var == "s0_pct"] <- model_df2_temp %>%
       filter(var == "s0_pct") %>%
-      mutate(z = z + (input$s0_pct_slider * 0.1)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
+      mutate(z = z + (input$s0_pct_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
       mutate(z_updated = (z * sd) + mean) %>%
       pull(z_updated)
 
@@ -264,12 +272,14 @@ server <- function(input, output) {
                     .fns = ~lag(.x,
                                 n = 2),
                     .names = "{.col}_2")) %>%
+      # join with full data set (with untempered variables)
       na.omit() %>%
       left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
                                                       forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
                 by = c("id", "year", "month")) %>%
       relocate(fire_count, x, y,
                .after = "year") %>%
+      # filter to month chosen by user
       filter(month == input$month_chosen) %>%
       # make predictions with `rf` model
       mutate(pred = predict(model, .)$predictions,
@@ -291,6 +301,56 @@ server <- function(input, output) {
 
 
   # ===== create leaflet map =====
+
+  # --- `vic_map_sf`: for outline of polygon in app
+  # Victoria map (sfdf MULTIPOLYGON)
+  vic_map_sf <- ozmaps::ozmap_states %>%
+    filter(NAME == "Victoria")
+
+  # --- project crs
+  vic_map_sf <- sf::st_transform(vic_map_sf,
+                                 crs = 4326)
+
+  # --- create `vic_raster` object *to be toggled
+  vic_raster <- raster::brick(
+    # no. of rows & columns (directly linked to resolution of grid cell)
+    nrows = 20,
+    ncols = 20,
+
+    # bbox (bounding box of Victoria)
+    xmn = 140.9617,
+    xmx = 149.9763,
+    ymn = -39.13396,
+    ymx = -33.99605,
+
+    # crs
+    crs = 4326,
+
+    # set `raster` values (rowwise)
+    # vals = seq(from = 1, to = 400000, by = 1000)
+  )
+
+  # --- set values (`id` each cell)
+  vic_raster <- vic_raster %>%
+    raster::setValues(values = seq(from = 1, to = 400, by = 1))
+
+  # --- mask raster; to only Victorian map
+
+  # change vic_map_sf to `sp` object
+  # *`raster::crop` & `raster::mask`; NOT compatible with `sf` yet; so; need; change to `sp`
+  vic_map_sp <- as(vic_map_sf,
+                   Class = "Spatial")
+
+  # mask (*think: crop to polygon shape) raster; to only Victorian map (`vic_map_sp`)
+  vic_raster_crop <- vic_raster %>%
+    raster::mask(mask = vic_map_sp)
+
+  # convert `raster` -> `spdf` -> `sf`; to conduct spatial join
+  vic_raster_crop_sf <- vic_raster_crop %>%
+    setValues(1:400) %>% # set id values *values required to convert to `spdf`
+    as(., "SpatialPolygonsDataFrame") %>%
+    sf::st_as_sf() %>%
+    rename(id = layer) # rename `layer` to `id`
 
   # --- palette intervals; based on user selected month
   pal_intervals <- shiny::reactive({
@@ -401,8 +461,8 @@ server <- function(input, output) {
       hideGroup(c("2017", "2018", "2019", "2020", "2021")) %>%
 
       # add & customise legend
-      addLegend(pal = pal,
-                values = pal_intervals()$brks,
+      addLegend(pal = pal, # palette
+                values = pal_intervals()$brks, # palette breaks
                 title = "predicted avg. proportion",
                 position = "bottomright") %>%
 
@@ -433,9 +493,9 @@ server <- function(input, output) {
 
   # --- plot variables of low = -10sd// avg.// high = +10sd
 
-  # `daily_rain`
+  # `daily_rain` plotly
   output$daily_rain_plotly <- plotly::renderPlotly({
-    # --- e.g. plotly
+
     model_df_id() %>%
       ungroup() %>%
       mutate(month = factor(month,
@@ -468,9 +528,9 @@ server <- function(input, output) {
       layout(yaxis = list(title = "daily_rain"))
   })
 
-  # `max_temp`
+  # `max_temp` plotly
   output$max_temp_plotly <- plotly::renderPlotly({
-    # --- e.g. plotly
+
     model_df_id() %>%
       ungroup() %>%
       mutate(month = factor(month,
@@ -503,8 +563,9 @@ server <- function(input, output) {
       layout(yaxis = list(title = "max_temp"))
   })
 
+  # `et_short_crop` plotly
   output$et_short_crop_plotly <- plotly::renderPlotly({
-    # --- e.g. plotly
+
     model_df_id() %>%
       ungroup() %>%
       mutate(month = factor(month,
