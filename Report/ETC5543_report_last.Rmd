@@ -502,19 +502,30 @@ The current project builds on the "Fire Risk" Tab. On top of the historical bush
 knitr::include_graphics(here::here("VICfire/data/report/bushfire-risk-info.png"))
 ```
 
-The current state of the historical bushfire risk Information tab is shown in Figure \@ref(fig:app-hist-info). User interactivity includes toggling the values of the variables (max_temp, radiation, rh, et_short_crop, si10, s0_pct, daily_raain, lai_hv). These variables are chosen based on the variable importance using `LIME` package. On the left side of the app is where users can play around with the variables. The changes are based on the standard deviations of each variables for each cell id with a range of -4sd to 4sd (100%? talk more about this). 
+The current state of the historical bushfire risk Information tab is shown in Figure \@ref(fig:app-hist-info). The main panel of the app shows a map of Victoria in a 20x20 grid cells with bushfire risk predictions for each of the cells in terms of proportions, calculated based on the baseline total. The random forest model is incorporated to predict the risk of bushfire based on weather variables. Users will be able to toggle the various variables and make forecasts under different scenarios.
 
-User can also choose the months to compute number of bushfires from. Upon clicking a grid cell, the data table and plots are produced. The table provides information of the different weather and landscape variables. Plots show the historically the number of bushfires and values of each variable (max temperature in this case) which might be of interest to users. These are made downloadable for interested users. 
+User interactivity includes toggling the values of the variables (daily rain, evapotranspiration rate, maximum temperature, radiation, relative humidity, wind speed, and surface soil moisture). These variables are chosen based on the variable importance using `LIME` package. On the left side of the app is where users can play around with the variables. The changes are based on the standard deviations of each variables for each cell id with a range of -4sd to 4sd, which means that -100% is referring to the values being deducted by 4 standard deviations, while 100% means that the values is being increased by 4 standard deviations. When users change the values, the updated values would be provided. A choice of months is presented on the app to allow users to choose which months they want to visualise. 
 
+User can choose the bushfire seasons to overlay historical ignition points. Upon clicking a grid cell, the data table and plots are produced. The table provides information of the different weather and landscape variables. Plots show the historically the number of bushfires and values of each variable which might be of interest to users. These are made downloadable for interested users. 
 
-```{r app-pred, fig.cap="rough plan for bushfire risk map"}
-knitr::include_graphics(here::here("VICfire/data/report/shiny_plan.png"))
-```
-
-Additionally, a rough sketch of bushfire fire risk map in the app is shown above (Figure \@ref(fig:app-pred). It incorporates the random forest model to make predictions of the bushfire risk in a particular cell in real time. Users will be able to toggle the various variables and make forecasts under different scenarios. A detail is that not all cells shown will increase the same amount but instead at a relative rate (by %) to account for the fact that different places have different weather conditions.  
 
 # Final insights
-
+Based on the risk predictions model, different months have different risks of bushfire with March being the most risky month, followed by January and December. October is the least risky month. Another insight is that different months have different risky locations. These following locations are deemed to be generally risky of bushfires: 
+- Inglewood
+- Horsham
+- Edenhope
+- Hamilton
+- Dunkeld
+- Mortlake
+- Casterton
+- Willaura
+- Mount Elizabeth Nature Conservation Reserve
+- Snowy River National Park
+- Murray Sunset National Park
+- Warburton 
+- Macalister Gorge Natural Features and Scenic Reserve
+- Lake Gnarpurt
+- Katamatite
 
 
 # Summary and future works
