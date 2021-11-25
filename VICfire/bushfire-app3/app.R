@@ -36,7 +36,9 @@ predicted_data <- model_df2 %>% na.omit() %>%
   summarise(avg_pred = mean(predictions))
 
 
-baseline_total <- sum(predicted_data$avg_pred)
+baseline_total <- predicted_data %>%
+  group_by(month) %>%
+  summarise(sum = sum(avg_pred))
 
 # **************************************** define UI ****************************************
 
@@ -266,6 +268,9 @@ server <- function(input, output) {
       pull(z_updated)
 
     # --- recreate `model_df2` with tampered variables
+    total_month <- baseline_total %>%
+      filter(month == input$month_chosen)
+    
     model_df2_temp2 <- model_df2_temp %>%
       dplyr::select(id, year, month, var, value) %>%
       pivot_wider(names_from = var,
@@ -296,7 +301,7 @@ server <- function(input, output) {
       summarise(avg_pred = mean(pred)) %>%
       ungroup() %>%
       mutate(total = sum(avg_pred)) %>%
-      mutate(avg_pred_prop = avg_pred / baseline_total,
+      mutate(avg_pred_prop = avg_pred / total_month$sum,
              .after = "avg_pred")
 
     # extract `id` & `geometry` column (i.e. polygon for each grid cell)
