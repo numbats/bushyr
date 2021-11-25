@@ -7,6 +7,7 @@ library(DT)
 library(shinyWidgets)
 library(shinycssloaders)
 library(ranger)
+library(raster)
 
 # **************************************** outside app ****************************************
 
@@ -18,17 +19,24 @@ library(ranger)
 # model_df2_low_avg_high <- read_csv(here::here("data/model_df2_low_avg_high.csv"))
 
 # --- df; with predictors & response; for modelling
-model_df2 <- readr::read_rds("model_df2.rds")
+model_df2 <- readr::read_rds(here::here("VICfire/bushfire-app3/model_df2.rds"))
 
 # --- df; with {predictors}_low: -4 sd from mean// {predictors}_avg// {predictors}_high: +4 sd from mean; for plotlys
-model_df2_low_avg_high <- readr::read_rds("model_df2_low_avg_high.rds")
+model_df2_low_avg_high <- readr::read_rds(here::here("VICfire/bushfire-app3/model_df2_low_avg_high.rds"))
 
 # --- df; with fire ignitions; from 2016 to 2021; for overlaying on map
-cluster_16_21_sf <- readr::read_rds("cluster_16_21_sf.rds")
+cluster_16_21_sf <- readr::read_rds(here::here("VICfire/bushfire-app3/cluster_16_21_sf.rds"))
 
 # --- `ranger` model object; for predictions
-model <- readr::read_rds("rfmodel_final.rds")
+model <- readr::read_rds(here::here("VICfire/bushfire-app3/rfmodel_final.rds"))
 
+predicted_data <- model_df2 %>% na.omit() %>%
+  mutate(predictions = predict(model, model_df2 %>% na.omit())$predictions) %>%
+  group_by(id, month) %>%
+  summarise(avg_pred = mean(predictions))
+
+
+baseline_total <- sum(predicted_data$avg_pred)
 
 # **************************************** define UI ****************************************
 
@@ -193,7 +201,7 @@ server <- function(input, output) {
     model_df2_temp <- model_df2 %>%
       na.omit() %>%
       # select variables; user toggle
-      select(id, year, month, daily_rain:s0_pct,
+      dplyr::select(id, year, month, daily_rain:s0_pct,
              -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
       pivot_longer(cols = daily_rain:s0_pct,
                    values_to = "value",
@@ -259,7 +267,7 @@ server <- function(input, output) {
 
     # --- recreate `model_df2` with tampered variables
     model_df2_temp2 <- model_df2_temp %>%
-      select(id, year, month, var, value) %>%
+      dplyr::select(id, year, month, var, value) %>%
       pivot_wider(names_from = var,
                   values_from = value) %>%
       ungroup() %>%
@@ -274,7 +282,7 @@ server <- function(input, output) {
                     .names = "{.col}_2")) %>%
       # join with full data set (with untempered variables)
       na.omit() %>%
-      left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+      left_join(., model_df2 %>% na.omit() %>% dplyr::select(id, year, month, # keys
                                                       forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
                 by = c("id", "year", "month")) %>%
       relocate(fire_count, x, y,
@@ -288,7 +296,7 @@ server <- function(input, output) {
       summarise(avg_pred = mean(pred)) %>%
       ungroup() %>%
       mutate(total = sum(avg_pred)) %>%
-      mutate(avg_pred_prop = avg_pred / total,
+      mutate(avg_pred_prop = avg_pred / baseline_total,
              .after = "avg_pred")
 
     # extract `id` & `geometry` column (i.e. polygon for each grid cell)
