@@ -7,7 +7,6 @@ library(DT)
 library(shinyWidgets)
 library(shinycssloaders)
 library(ranger)
-library(raster)
 
 # **************************************** outside app ****************************************
 
@@ -19,26 +18,18 @@ library(raster)
 # model_df2_low_avg_high <- read_csv(here::here("data/model_df2_low_avg_high.csv"))
 
 # --- df; with predictors & response; for modelling
-model_df2 <- readr::read_rds(here::here("VICfire/bushfire-app3/model_df2.rds"))
+# *note: na.omit() later; to remove grid cells (`id`) not in Victoria
+model_df2 <- readr::read_rds("model_df2.rds")
 
 # --- df; with {predictors}_low: -4 sd from mean// {predictors}_avg// {predictors}_high: +4 sd from mean; for plotlys
-model_df2_low_avg_high <- readr::read_rds(here::here("VICfire/bushfire-app3/model_df2_low_avg_high.rds"))
+model_df2_low_avg_high <- readr::read_rds("model_df2_low_avg_high.rds")
 
 # --- df; with fire ignitions; from 2016 to 2021; for overlaying on map
-cluster_16_21_sf <- readr::read_rds(here::here("VICfire/bushfire-app3/cluster_16_21_sf.rds"))
+cluster_16_21_sf <- readr::read_rds("cluster_16_21_sf.rds")
 
 # --- `ranger` model object; for predictions
-model <- readr::read_rds(here::here("VICfire/bushfire-app3/rfmodel_final.rds"))
+model <- readr::read_rds("rfmodel_final.rds")
 
-predicted_data <- model_df2 %>% na.omit() %>%
-  mutate(predictions = predict(model, model_df2 %>% na.omit())$predictions) %>%
-  group_by(id, month) %>%
-  summarise(avg_pred = mean(predictions))
-
-
-baseline_total <- predicted_data %>%
-  group_by(month) %>%
-  summarise(sum = sum(avg_pred))
 
 # **************************************** define UI ****************************************
 
@@ -47,8 +38,11 @@ options(spinner.color = "#b22222")
 
 ui <- fluidPage(
 
+  # ---
+  shinyalert::useShinyalert(),
+
   # --- set background colour
-  shinyWidgets::setBackgroundColor(color = "ghostwhite"),
+  shinyWidgets::setBackgroundColor(color = "#FFF5EE"),
 
   # --- app title
   tags$h1("Bushfire Risk Predictions",
@@ -56,109 +50,144 @@ ui <- fluidPage(
           align = "center"),
   br(),
 
-  sidebarLayout(
-    # === sidebarPanel for user interactivity
-    shiny::sidebarPanel(width = 2,
+  shiny::fluidRow(
+    # === side column for user interactivity
+    shiny::column(width = 2,
 
-                        # --- user; choose month
-                        radioGroupButtons(
-                          inputId = "month_chosen",
-                          label = "Choose month",
-                          choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"), # values shown to users
-                          choiceValues = c(10, 11, 12, 1, 2, 3), # values internal
-                          selected = 12,
-                          status = "danger"
-                        ),
+                  # --- user; choose month
+                  radioGroupButtons(
+                    inputId = "month_chosen",
+                    label = tags$h2("Toggle month & variable values"),
+                    choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"), # values shown to users
+                    choiceValues = c(10, 11, 12, 1, 2, 3), # values internal
+                    size = "lg",
+                    selected = 12,
+                    status = "danger"
+                  ),
 
-                        # --- user; toggle variable values
+                  # --- user; toggle variable values
 
-                        # `daily_rain`
-                        shinyWidgets::sliderTextInput(inputId = "daily_rain_slider",
-                                                      label = "toggle daily rain",
-                                                      choices = -100:100,
-                                                      selected = 0,
-                                                      post = "%"),
+                  # `daily_rain`
+                  shinyWidgets::sliderTextInput(inputId = "daily_rain_slider",
+                                                label = tags$h4("Daily rain"),
+                                                choices = -100:100,
+                                                selected = 0,
+                                                post = "%"),
 
-                        # `et_short_crop`
-                        shinyWidgets::sliderTextInput(inputId = "et_short_crop_slider",
-                                                      label = "toggle evapotranspiration rate",
-                                                      choices = -100:100,
-                                                      selected = 0,
-                                                      post = "%"),
+                  # `et_short_crop`
+                  shinyWidgets::sliderTextInput(inputId = "et_short_crop_slider",
+                                                label = tags$h4("Evapotranspiration rate"),
+                                                choices = -100:100,
+                                                selected = 0,
+                                                post = "%"),
 
-                        # `max_temp`
-                        shinyWidgets::sliderTextInput(inputId = "max_temp_slider",
-                                                      label = "toggle max temperature",
-                                                      choices = -100:100,
-                                                      selected = 0,
-                                                      post = "%"),
-                        # `radiation`
-                        shinyWidgets::sliderTextInput(inputId = "radiation_slider",
-                                                      label = "toggle radiation",
-                                                      choices = -100:100,
-                                                      selected = 0,
-                                                      post = "%"),
+                  # `max_temp`
+                  shinyWidgets::sliderTextInput(inputId = "max_temp_slider",
+                                                label = tags$h4("Max temperature"),
+                                                choices = -100:100,
+                                                selected = 0,
+                                                post = "%"),
+                  # `radiation`
+                  shinyWidgets::sliderTextInput(inputId = "radiation_slider",
+                                                label = tags$h4("Radiation"),
+                                                choices = -100:100,
+                                                selected = 0,
+                                                post = "%"),
 
-                        # `rh`
-                        shinyWidgets::sliderTextInput(inputId = "rh_slider",
-                                                      label = "toggle relative humidity",
-                                                      choices = -100:100,
-                                                      selected = 0,
-                                                      post = "%"),
+                  # `rh`
+                  shinyWidgets::sliderTextInput(inputId = "rh_slider",
+                                                label = tags$h4("Relative humidity"),
+                                                choices = -100:100,
+                                                selected = 0,
+                                                post = "%"),
 
-                        # `si10`
-                        shinyWidgets::sliderTextInput(inputId = "si10_slider",
-                                                      label = "toggle 10m wind speed",
-                                                      choices = -100:100,
-                                                      selected = 0,
-                                                      post = "%"),
+                  # `si10`
+                  shinyWidgets::sliderTextInput(inputId = "si10_slider",
+                                                label = tags$h4("10m wind speed"),
+                                                choices = -100:100,
+                                                selected = 0,
+                                                post = "%"),
 
-                        # `s0_pct`
-                        shinyWidgets::sliderTextInput(inputId = "s0_pct_slider",
-                                                      label = "toggle surface soil moisture",
-                                                      choices = -100:100,
-                                                      selected = 0,
-                                                      post = "%")
+                  # `s0_pct`
+                  shinyWidgets::sliderTextInput(inputId = "s0_pct_slider",
+                                                label = tags$h4("Surface soil moisture"),
+                                                choices = -100:100,
+                                                selected = 0,
+                                                post = "%"),
+
+                  # --- reset button
+                  shinyWidgets::actionBttn(inputId = "reset_bttn",
+                                           label = "Reset",
+                                           style = "fill",
+                                           color = "danger",
+                                           icon = icon("undo")),
+
+                  br(), br(), br(),
+
+                  # --- information button
+                  actionBttn(inputId = "info_bttn",
+                             label = "",
+                             style = "material-circle",
+                             color = "danger",
+                             icon = icon("info"))
+
+
     ),
 
-    # === mainPanel for leaflet map
-    shiny::mainPanel(width = 10,
-                     leaflet::leafletOutput("map",
-                                            height = 500) %>%
-                       shinycssloaders::withSpinner()
-    )
+    # === main column; for leaflet map
+    shiny::column(width = 8,
+                  # leaflet map
+                  leaflet::leafletOutput("map",
+                                         height = 1000) %>%
+                    shinycssloaders::withSpinner(),
+
+                  shiny::h2("click grid cell to view prediction information for that cell"),
+
+                  br(), br(), br(),
+
+                  DT::DTOutput("datatable") %>%
+                    shinycssloaders::withSpinner()
+
+    ),
+
+    # === right column; for plotly outputs
+    shiny::column(width = 2,
+
+                  shiny::h2("Average monthly variable values from 2016-2018"),
+
+                  # `daily_rain`
+                  plotly::plotlyOutput("daily_rain_plotly") %>%
+                    shinycssloaders::withSpinner(),
+
+                  # `max_temp`
+                  plotly::plotlyOutput("max_temp_plotly") %>%
+                    shinycssloaders::withSpinner(),
+
+                  # `et_short_crop`
+                  plotly::plotlyOutput("et_short_crop_plotly") %>%
+                    shinycssloaders::withSpinner(),
+
+                  # `radiation`
+                  plotly::plotlyOutput("radiation_plotly") %>%
+                    shinycssloaders::withSpinner(),
+                  ),
+
   ),
-  br(), br(),
-
-  # ========== DT::datatable ==========
-  fluidRow(
-    DT::DTOutput("datatable") %>%
-      shinycssloaders::withSpinner(),
-  ),
-  br(), br(),
-
-
-
-  # ========== plotly ==========
-  fluidRow(
-    column(width = 4,
-           plotly::plotlyOutput("daily_rain_plotly") %>%
-             shinycssloaders::withSpinner()),
-
-    column(width = 4,
-           plotly::plotlyOutput("max_temp_plotly") %>%
-             shinycssloaders::withSpinner()),
-
-    column(width = 4,
-           plotly::plotlyOutput("et_short_crop_plotly") %>%
-             shinycssloaders::withSpinner())
-
-  )
-
+  br(), br()
 )
 
 # **************************************** define server ****************************************
-server <- function(input, output) {
+server <- function(input, output, session) {
+
+  shiny::observeEvent(input$info_bttn, {
+    # show a modal; when button pressed
+    shinyalert::shinyalert(title = "Information- This is a bushfire risk prediction map",
+                           size = "m", # size of modal
+                           showConfirmButton = T, # no confirm button
+                           closeOnEsc = T,
+                           closeOnClickOutside = T,
+                           type = "info") # info logo
+  })
 
   # --- based on user selected month; create reactive dfs for each bushfire season for circle marker overlay groups
   cluster_16_sf <- shiny::reactive({
@@ -197,13 +226,64 @@ server <- function(input, output) {
              month == input$month_chosen)
   })
 
-  # --- based on user selected month; predict avg
+  # --- based on user selected month; predict avg. *to extract baseline
+  model_df_pred_baseline <- shiny::reactive({
+    model_df2_temp <- model_df2 %>%
+      na.omit() %>%
+      # select variables; user toggle
+      select(id, year, month, daily_rain:s0_pct,
+             -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
+      pivot_longer(cols = daily_rain:s0_pct,
+                   values_to = "value",
+                   names_to = "var") %>%
+      # for each id & variable
+      group_by(id, var, month) %>%
+      mutate(z = (value - mean(value, na.rm = T)) / sd(value, na.rm = T), # compute z RV
+             mean = mean(value, na.rm = T), # compute mean
+             sd = sd(value, na.rm = T)) # compute sd
+
+    # --- recreate `model_df2` with variables values
+    model_df2_temp2 <- model_df2_temp %>%
+      select(id, year, month, var, value) %>%
+      pivot_wider(names_from = var,
+                  values_from = value) %>%
+      ungroup() %>%
+      # compute 1st lag
+      mutate(across(.cols = daily_rain:s0_pct,
+                    .fns = ~lag(.x),
+                    .names = "{.col}_1")) %>%
+      # compute 2nd lag
+      mutate(across(.cols = daily_rain:s0_pct,
+                    .fns = ~lag(.x,
+                                n = 2),
+                    .names = "{.col}_2")) %>%
+      # join with full data set (with untempered variables)
+      na.omit() %>%
+      left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+                                                      forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+                by = c("id", "year", "month")) %>%
+      relocate(fire_count, x, y,
+               .after = "year") %>%
+      # filter to month chosen by user
+      filter(month == input$month_chosen) %>%
+      # make predictions with `rf` model
+      mutate(pred = predict(model, .)$predictions,
+             .after = "fire_count") %>%
+      group_by(id) %>%
+      summarise(avg_pred = mean(pred)) %>%
+      ungroup() %>%
+      mutate(total = sum(avg_pred)) %>% # baseline total
+      mutate(avg_pred_prop = avg_pred / total,
+             .after = "avg_pred")
+  })
+
+  # --- based on user selected month & toggled variables; predict avg.
   model_df_pred <- shiny::reactive({
 
     model_df2_temp <- model_df2 %>%
       na.omit() %>%
       # select variables; user toggle
-      dplyr::select(id, year, month, daily_rain:s0_pct,
+      select(id, year, month, daily_rain:s0_pct,
              -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
       pivot_longer(cols = daily_rain:s0_pct,
                    values_to = "value",
@@ -221,7 +301,7 @@ server <- function(input, output) {
     model_df2_temp$value[model_df2_temp$var == "daily_rain"] <- model_df2_temp %>%
       filter(var == "daily_rain") %>%
       mutate(z = z + (input$daily_rain_slider * 0.04)) %>% # change z values; according to user toggle
-      mutate(z_updated = (z * sd) + mean) %>%
+      mutate(z_updated = pmax((z * sd) + mean, 0)) %>% # value cannot be < 0
       pull(z_updated)
 
     # `et_short_crop`
@@ -242,14 +322,14 @@ server <- function(input, output) {
     model_df2_temp$value[model_df2_temp$var == "radiation"] <- model_df2_temp %>%
       filter(var == "radiation") %>%
       mutate(z = z + (input$radiation_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
-      mutate(z_updated = (z * sd) + mean) %>%
+      mutate(z_updated = pmax((z * sd) + mean, 0)) %>% # value cannot be < 0
       pull(z_updated)
 
     # `rh`
     model_df2_temp$value[model_df2_temp$var == "rh"] <- model_df2_temp %>%
       filter(var == "rh") %>%
       mutate(z = z + (input$rh_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
-      mutate(z_updated = (z * sd) + mean) %>%
+      mutate(z_updated = pmax((z * sd) + mean, 0)) %>% # value cannot be < 0
       pull(z_updated)
 
 
@@ -257,22 +337,19 @@ server <- function(input, output) {
     model_df2_temp$value[model_df2_temp$var == "si10"] <- model_df2_temp %>%
       filter(var == "si10") %>%
       mutate(z = z + (input$si10_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
-      mutate(z_updated = (z * sd) + mean) %>%
+      mutate(z_updated = pmax((z * sd) + mean, 0)) %>% # value cannot be < 0
       pull(z_updated)
 
     # `s0_pct`
     model_df2_temp$value[model_df2_temp$var == "s0_pct"] <- model_df2_temp %>%
       filter(var == "s0_pct") %>%
       mutate(z = z + (input$s0_pct_slider * 0.04)) %>% # change z values; according to user toggle// *0.1 because user chooses in %
-      mutate(z_updated = (z * sd) + mean) %>%
+      mutate(z_updated = pmax((z * sd) + mean, 0)) %>% # value cannot be < 0
       pull(z_updated)
 
     # --- recreate `model_df2` with tampered variables
-    total_month <- baseline_total %>%
-      filter(month == input$month_chosen)
-    
     model_df2_temp2 <- model_df2_temp %>%
-      dplyr::select(id, year, month, var, value) %>%
+      select(id, year, month, var, value) %>%
       pivot_wider(names_from = var,
                   values_from = value) %>%
       ungroup() %>%
@@ -287,7 +364,7 @@ server <- function(input, output) {
                     .names = "{.col}_2")) %>%
       # join with full data set (with untempered variables)
       na.omit() %>%
-      left_join(., model_df2 %>% na.omit() %>% dplyr::select(id, year, month, # keys
+      left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
                                                       forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
                 by = c("id", "year", "month")) %>%
       relocate(fire_count, x, y,
@@ -300,15 +377,56 @@ server <- function(input, output) {
       group_by(id) %>%
       summarise(avg_pred = mean(pred)) %>%
       ungroup() %>%
-      mutate(total = sum(avg_pred)) %>%
-      mutate(avg_pred_prop = avg_pred / total_month$sum,
+      mutate(total = sum(avg_pred)) %>% # baseline total
+      mutate(avg_pred_prop = avg_pred / total,
              .after = "avg_pred")
+
+    model_df2_temp2$total <- model_df_pred_baseline()$total
 
     # extract `id` & `geometry` column (i.e. polygon for each grid cell)
     vic_raster_crop_sf %>%
       mutate(id = as_factor(id)) %>%
       # join with predicted data
       left_join(., model_df2_temp2)
+  })
+
+  # --- reset button clicked; update sliders to 0
+  shiny::observeEvent(input$reset_bttn, {
+
+    # `daily_rain`
+    shinyWidgets::updateSliderTextInput(session = session,
+                                        inputId = c("daily_rain_slider"),
+                                        selected = 0)
+
+    # `et_short_crop`
+    shinyWidgets::updateSliderTextInput(session = session,
+                                        inputId = c("et_short_crop_slider"),
+                                        selected = 0)
+
+    # `max_temp`
+    shinyWidgets::updateSliderTextInput(session = session,
+                                        inputId = c("max_temp_slider"),
+                                        selected = 0)
+
+    # `radiation`
+    shinyWidgets::updateSliderTextInput(session = session,
+                                        inputId = c("radiation_slider"),
+                                        selected = 0)
+
+    # `rh`
+    shinyWidgets::updateSliderTextInput(session = session,
+                                        inputId = c("rh_slider"),
+                                        selected = 0)
+
+    # `si10`
+    shinyWidgets::updateSliderTextInput(session = session,
+                                        inputId = c("si10_slider"),
+                                        selected = 0)
+
+    # `s0_pct`
+    shinyWidgets::updateSliderTextInput(session = session,
+                                        inputId = c("s0_pct_slider"),
+                                        selected = 0)
   })
 
 
@@ -384,7 +502,7 @@ server <- function(input, output) {
     # --- create base map
     base_map <- leaflet(options = leafletOptions(
       # set min & max zoom
-      minZoom = 6.45,
+      minZoom = 7.49,
       maxZoom = 11
     )) %>%
       # add provider Tiles
@@ -399,10 +517,10 @@ server <- function(input, output) {
                          lat2 = -33.99605) %>%
       # set max bounds of map
       # disable dragging map; too far out of bounds
-      setMaxBounds(lng1 = 140.9617 - 0.4,
-                   lng2 = 149.9763 + 0.4,
-                   lat1 = -39.13396 - 0.4,
-                   lat2 = -33.99605 + 0.4)
+      leaflet::setMaxBounds(lng1 = 140.9617 - 0.4,
+                            lng2 = 149.9763 + 0.4,
+                            lat1 = -39.13396 - 0.4,
+                            lat2 = -33.99605 + 0.4)
 
     # --- palette for polygon data
     pal <- leaflet::colorBin(palette = "YlOrRd",
@@ -424,8 +542,10 @@ server <- function(input, output) {
                   layerId = ~id,
                   fillOpacity = 0.4,
                   color = ~pal(avg_pred_prop), # fill by  avg. predicted proportions; using above palette
-                  popup = ~paste0("<b> id: ", id, "</b>", "<br/>",
-                                  "number of ignitions: ", round(avg_pred_prop, 3))) %>% # click pop-up texts
+                  popup = ~paste0("<h3 style='font-size:5; color:#1E90FF'><b> id: ", id, "</b></h3>", "<br/>",
+                                  "<h3 style='font-size:5'><b>predicted fire ignitions baseline total for month </b>", input$month_chosen, "= ", round(total, 2), "</h3>", "<br/>",
+                                  # "<h3 style='font-size:5'><b>number of predicted ignitions: </b>", round(avg_pred_prop, 3), "</h3>",
+                                  "<h3 style='font-size:5'><b>If there were 1,000 fire ignitions, ", round(1000*(avg_pred/total), 2), " is predicted to occur in this grid cell </h3>")) %>% # click pop-up texts
 
       # --- add circle markers; each `bf_season` as a layer
       # 2016
@@ -497,8 +617,10 @@ server <- function(input, output) {
   output$datatable <- DT::renderDT(
     model_df_pred() %>%
       sf::st_set_geometry(NULL) %>% # drop geometry column
-      DT::datatable(options = list(scrollX = T,
-                                   pageLength = 5)) %>%
+      DT::datatable(caption = htmltools::tags$caption(tags$h3(style = 'caption-side: top; text-align: left;',
+                                                              "Prediction Table")),
+                    options = list(scrollX = T,
+                                   pageLength = 10)) %>%
       DT::formatRound(columns = 2:4,
                       digits = 3)
   )
@@ -604,6 +726,40 @@ server <- function(input, output) {
       # add average line + markers
       add_trace(x = ~year,
                 y = ~et_short_crop_avg,
+                type = 'scatter',
+                mode = 'lines+markers',
+                line = list(color='rgb(0,100,80)'),
+                name = 'Average') %>%
+      layout(yaxis = list(title = "et_short_crop"))
+  })
+
+  output$radiation_plotly <- plotly::renderPlotly({
+
+    model_df_id() %>%
+      ungroup() %>%
+      mutate(month = factor(month,
+                            levels = c(10, 11, 12, 1, 2, 3))) %>%
+      # add high & low filled
+      plot_ly(data = .,
+              x = ~year,
+              y = ~radiation_high,
+              type = "scatter",
+              mode = "lines",
+              line = list(color = 'transparent'),
+              showlegend = FALSE,
+              name = 'High') %>%
+      add_trace(x = ~year,
+                y = ~radiation_low,
+                type = 'scatter',
+                mode = 'lines',
+                fill = 'tonexty',
+                fillcolor='rgba(0,100,80,0.2)',
+                line = list(color = 'transparent'),
+                showlegend = FALSE,
+                name = 'Low') %>%
+      # add average line + markers
+      add_trace(x = ~year,
+                y = ~radiation_avg,
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
