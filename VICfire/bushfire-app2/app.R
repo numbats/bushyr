@@ -16,6 +16,33 @@ load(here::here("data/eda.RData"))
 # --- set spinner colour to red
 options(spinner.color = "#b22222")
 
+# ========== include `bf_season` in data set
+# create storage vector
+bf_season <- numeric(nrow(ignition_rasterize_cluster_sf_month))
+
+# start from group 1
+group <- 1
+current_year <- min(as.numeric(as.character(ignition_rasterize_cluster_sf_month$year))) # start from minimum year
+
+# --- for loop
+# •if following year & month == 10; group + 1
+# -> i.e. group by bushfire season (10(Oct) to 3(March))
+for(i in seq_along(ignition_rasterize_cluster_sf_month$year)){
+
+    # group + 1; if its next year & month == 10 (October)
+    if(current_year == ignition_rasterize_cluster_sf_month$year[i] - 1 & ignition_rasterize_cluster_sf_month$month[i]  == 10){
+        group <- group + 1
+        current_year <- current_year + 1
+    }
+
+    bf_season[i] <- group
+}
+
+ignition_rasterize_cluster_sf_month <- cbind(ignition_rasterize_cluster_sf_month, bf_season) %>%
+    group_by(bf_season) %>%
+    mutate(bf_season = paste0(min(year), "-", min(year + 1)), # add `bf_season` column
+           id = as_factor(id)) %>% # coerce `id` to factor
+    ungroup()
 
 # **************************************** define UI ****************************************
 ui <- fluidPage(
@@ -32,10 +59,28 @@ ui <- fluidPage(
             # --- user; `month` checkbox buttons
             shinyWidgets::checkboxGroupButtons(inputId = "month_selected",
                                                label = "Month(s)",
-                                               choices = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"),
+                                               choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"),
+                                               choiceValues = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
+                                               selected = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
                                                status = "danger",
-                                               direction = "vertical",
-                                               size = "lg") # large size
+                                               checkIcon = list(yes = icon("ok",
+                                                                           lib = "glyphicon"),
+                                                                no = icon("remove",
+                                                                          lib = "glyphicon")),
+                                               direction = "horizontal",
+                                               size = "lg"), # large size
+
+            shinyWidgets::checkboxGroupButtons(inputId = "bf_season_selected",
+                                               label = "Bushfire season(s)",
+                                               choices = ignition_rasterize_cluster_sf_month %>% distinct(bf_season) %>% pull(bf_season), # unique bushfire seasons
+                                               selected = ignition_rasterize_cluster_sf_month %>% distinct(bf_season) %>% pull(bf_season),
+                                               status = "danger",
+                                               checkIcon = list(yes = icon("ok",
+                                                                           lib = "glyphicon"),
+                                                                no = icon("remove",
+                                                                          lib = "glyphicon")),
+                                               direction = "horizontal",
+                                               size = "lg")
         ),
 
         # === column for leaflet map output
@@ -79,10 +124,63 @@ ui <- fluidPage(
 # **************************************** define server ****************************************
 server <- function(input, output) {
 
-    # ===== create leaflet map =====
+    # ==================== create leaflet map ====================
+
+    # === create reactive data
+
+    # --- for overlay groups (points)
+    bf_season_2016_2017_sf <- shiny::reactive({
+        cluster_16_21_sf %>%
+            filter(bf_season == "2016-2017",
+                   month %in% input$month_selected)
+    })
+
+    bf_season_2017_2018_sf <- shiny::reactive({
+        cluster_16_21_sf %>%
+            filter(bf_season == "2017-2018",
+                   month %in% input$month_selected)
+    })
+
+    bf_season_2018_2019_sf <- shiny::reactive({
+        cluster_16_21_sf %>%
+            filter(bf_season == "2018-2019",
+                   month %in% input$month_selected)
+    })
+
+    bf_season_2019_2020_sf <- shiny::reactive({
+        cluster_16_21_sf %>%
+            filter(bf_season == "2019-2020",
+                   month %in% input$month_selected)
+    })
+
+    bf_season_2020_2021_sf <- shiny::reactive({
+        cluster_16_21_sf %>%
+            filter(bf_season == "2020-2021",
+                   month %in% input$month_selected)
+    })
+
+    # --- for grid cell (polygons)
+    ignition_rasterize_cluster_bf_season_rct <- shiny::reactive({
+        ignition_rasterize_cluster_sf_month_temp <- ignition_rasterize_cluster_sf_month %>%
+            # filter to user selected `bf_season` & `month`
+            dplyr::filter(bf_season %in% input$bf_season_selected,
+                          month %in% input$month_selected) %>%
+            # sum up `fire_count`; for each `id` (grid cell)
+            group_by(id) %>%
+            summarise(fire_count = sum(fire_count))
+
+        vic_raster_crop_sf %>% # `sf` object with `id` & `geometry`
+            mutate(id = as_factor(id)) %>%
+            # join with predicted data
+            left_join(., ignition_rasterize_cluster_sf_month_temp)
+    })
+
+
+
+    # --- create leaflet map start
     output$map <- leaflet::renderLeaflet({
 
-        # --- create base map
+        # create base map
         base_map <- leaflet(options = leafletOptions(
             # set min & max zoom
             minZoom = 6.45,
@@ -110,22 +208,6 @@ server <- function(input, output) {
                                      domain = c(1:50), # scale
                                      reverse = F)
 
-        # --- create df for each bushfire season for circle marker groups
-        bf_season_2016_2017_df <- cluster_16_21_sf %>%
-            filter(bf_season == "2016-2017")
-
-        bf_season_2017_2018_df <- cluster_16_21_sf %>%
-            filter(bf_season == "2017-2018")
-
-        bf_season_2018_2019_df <- cluster_16_21_sf %>%
-            filter(bf_season == "2018-2019")
-
-        bf_season_2019_2020_df <- cluster_16_21_sf %>%
-            filter(bf_season == "2019-2020")
-
-        bf_season_2020_2021_df <- cluster_16_21_sf %>%
-            filter(bf_season == "2020-2021")
-
 
         base_map %>%
             # add outline of Victoria
@@ -134,7 +216,7 @@ server <- function(input, output) {
                          weight = 3) %>%
 
             # add gridded cell
-            addPolygons(data = ignition_rasterize_cluster_bf_season %>% filter(bf_season == "2019-2020"),
+            addPolygons(data = ignition_rasterize_cluster_bf_season_rct(),
                         opacity = 0.1,
                         layerId = ~id,
                         fillOpacity = 0.4,
@@ -144,31 +226,31 @@ server <- function(input, output) {
 
             # --- add circle markers; each `bf_season` as a layer
             # 2016-2017
-            addCircleMarkers(data = bf_season_2016_2017_df,
+            addCircleMarkers(data = bf_season_2016_2017_sf(),
                              radius = 2,
                              fillOpacity = 0.01,
                              color = "grey",
                              group = "2016-2017") %>%
             # 2017-2018
-            addCircleMarkers(data = bf_season_2017_2018_df,
+            addCircleMarkers(data = bf_season_2017_2018_sf(),
                              radius = 2,
                              fillOpacity = 0.01,
                              color = "grey",
                              group = "2017-2018") %>%
             # 2018-2019
-            addCircleMarkers(data = bf_season_2018_2019_df,
+            addCircleMarkers(data = bf_season_2018_2019_sf(),
                              radius = 2,
                              fillOpacity = 0.01,
                              color = "grey",
                              group = "2018-2019") %>%
             # 2019-2020
-            addCircleMarkers(data = bf_season_2019_2020_df,
+            addCircleMarkers(data = bf_season_2019_2020_sf(),
                              radius = 2,
                              fillOpacity = 0.01,
                              color = "grey",
                              group = "2019-2020") %>%
             # 2020-2021
-            addCircleMarkers(data = bf_season_2018_2019_df,
+            addCircleMarkers(data = bf_season_2018_2019_sf(),
                              radius = 2,
                              fillOpacity = 0.01,
                              color = "grey",
