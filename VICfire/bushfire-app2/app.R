@@ -10,8 +10,13 @@ library(shinycssloaders)
 # **************************************** outside app ****************************************
 
 # ==================== read in data ====================
-load(here::here("data/ida.RData"))
-load(here::here("data/eda.RData"))
+# load(here::here("data/ida.RData"))
+# load(here::here("data/eda.RData"))
+
+model_df3 <- readr::read_rds("model_df3.rds")
+ignition_rasterize_cluster_sf_month <- readr::read_rds("ignition_rasterize_cluster_sf_month.rds")
+cluster_16_21_sf <- readr::read_rds("cluster_16_21_sf.rds")
+
 
 # --- set spinner colour to red
 options(spinner.color = "#b22222")
@@ -130,9 +135,61 @@ server <- function(input, output) {
 
     # ==================== create leaflet map ====================
 
+    # === `vic_map_sf`: for outline of polygon in app
+    # Victoria map (sfdf MULTIPOLYGON)
+    vic_map_sf <- ozmaps::ozmap_states %>%
+        filter(NAME == "Victoria")
+
+    # --- project crs
+    vic_map_sf <- sf::st_transform(vic_map_sf,
+                                   crs = 4326)
+
+    # === create `vic_raster` object *can be toggled
+    vic_raster <- raster::brick(
+        # no. of rows & columns (directly linked to resolution of grid cell)
+        nrows = 20,
+        ncols = 20,
+
+        # bbox (bounding box of Victoria)
+        xmn = 140.9617,
+        xmx = 149.9763,
+        ymn = -39.13396,
+        ymx = -33.99605,
+
+        # crs
+        crs = 4326,
+
+        # set `raster` values (rowwise)
+        # vals = seq(from = 1, to = 400000, by = 1000)
+    )
+
+    # set values (`id` each cell)
+    vic_raster <- vic_raster %>%
+        raster::setValues(values = seq(from = 1, to = 400, by = 1))
+
+    # --- mask raster; to only Victorian map
+
+    # change vic_map_sf to `sp` object
+    # *`raster::crop` & `raster::mask`; NOT compatible with `sf` yet; so; need; change to `sp`
+    vic_map_sp <- as(vic_map_sf,
+                     Class = "Spatial")
+
+    # mask (*think: crop to polygon shape) raster; to only Victorian map (`vic_map_sp`)
+    vic_raster_crop <- vic_raster %>%
+        raster::mask(mask = vic_map_sp)
+
+    # convert `raster` -> `spdf` -> `sf`; to conduct spatial join
+    vic_raster_crop_sf <- vic_raster_crop %>%
+        setValues(1:400) %>% # set id values *values required to convert to `spdf`
+        as(., "SpatialPolygonsDataFrame") %>%
+        sf::st_as_sf() %>%
+        rename(id = layer) # rename `layer` to `id`
+
     # === create reactive data
 
     # --- for overlay groups (points)
+    sf::st_crs(cluster_16_21_sf) <- 4326 # project crs
+
     bf_season_2016_2017_sf <- shiny::reactive({
         cluster_16_21_sf %>%
             filter(bf_season == "2016-2017",
