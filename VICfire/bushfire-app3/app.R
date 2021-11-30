@@ -1,12 +1,13 @@
 library(shiny)
 library(tidyverse)
-library(tmap)
-library(plotly)
-library(leaflet)
 library(DT)
-library(shinyWidgets)
-library(shinycssloaders)
+library(leaflet)
+library(plotly)
 library(ranger)
+library(raster)
+library(tmap)
+library(shinycssloaders)
+library(shinyWidgets)
 
 # **************************************** outside app ****************************************
 
@@ -38,7 +39,7 @@ options(spinner.color = "#b22222")
 
 ui <- fluidPage(
 
-  # ---
+  # --- use shinyalert; for information modal
   shinyalert::useShinyalert(),
 
   # --- set background colour
@@ -152,6 +153,7 @@ ui <- fluidPage(
 
     # === right column; for plotly outputs
     shiny::column(width = 2,
+                  style = "max-height: 85vh; overflow-y: auto;", # add vertical scroll bar
 
                   shiny::h2("Average monthly variable values from 2016-2018"),
 
@@ -534,7 +536,7 @@ server <- function(input, output, session) {
       # add outline of Victoria
       addPolylines(data = vic_map_sf,
                    color = "black",
-                   weight = 3) %>%
+                   weight = 3.5) %>%
 
       # add gridded cell
       addPolygons(data = model_df_pred(),
@@ -620,8 +622,11 @@ server <- function(input, output, session) {
       na.omit() %>%
       DT::datatable(caption = htmltools::tags$caption(tags$h3(style = 'caption-side: top; text-align: left;',
                                                               "Prediction Table")),
-                    options = list(scrollX = T,
-                                   pageLength = 10)) %>%
+                    options = list(scrollX = T, # scroll horizontal
+                                   pageLength = 5,
+                                   dom = "Bfrtip", # dom options
+                                   buttons = c("csv", "excel")),
+                    extensions = "Buttons") %>%
       DT::formatRound(columns = 2:4,
                       digits = 3)
   )

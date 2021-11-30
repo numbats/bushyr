@@ -1,11 +1,12 @@
 library(shiny)
 library(tidyverse)
-library(tmap)
-library(plotly)
-library(leaflet)
 library(DT)
-library(shinyWidgets)
+library(leaflet)
+library(plotly)
+library(raster)
+library(tmap)
 library(shinycssloaders)
+library(shinyWidgets)
 
 # **************************************** outside app ****************************************
 
@@ -52,82 +53,89 @@ ignition_rasterize_cluster_sf_month <- cbind(ignition_rasterize_cluster_sf_month
 # **************************************** define UI ****************************************
 ui <- fluidPage(
 
+    # --- set background colour
+    shinyWidgets::setBackgroundColor(color = "#FFF5EE"),
+
     # add app title
     tags$h1("Bushfire Risk Information",
             style = "font-family: Impact; color: #1e90ff; font-size: 60px",
             align = "center"),
     br(),
 
-    sidebarLayout(
+    shiny::fluidRow(
         # === column for user interactivity
-        sidebarPanel(width = 2,
-                     # --- user; `month` checkbox buttons
-                     shinyWidgets::checkboxGroupButtons(inputId = "month_selected",
-                                                        label = "Month(s)",
-                                                        choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"),
-                                                        choiceValues = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
-                                                        selected = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
-                                                        status = "danger",
-                                                        checkIcon = list(yes = icon("ok",
-                                                                                    lib = "glyphicon"),
-                                                                         no = icon("remove",
-                                                                                   lib = "glyphicon")),
-                                                        direction = "horizontal",
-                                                        size = "lg"), # large size
+        shiny::column(width = 2,
 
-                     shinyWidgets::checkboxGroupButtons(inputId = "bf_season_selected",
-                                                        label = "Bushfire season(s)",
-                                                        choices = ignition_rasterize_cluster_sf_month %>% distinct(bf_season) %>% pull(bf_season), # unique bushfire seasons
-                                                        selected = c("2016-2017"),
-                                                        status = "danger",
-                                                        checkIcon = list(yes = icon("ok",
-                                                                                    lib = "glyphicon"),
-                                                                         no = icon("remove",
-                                                                                   lib = "glyphicon")),
-                                                        direction = "horizontal",
-                                                        size = "lg"),
-                     br(), br(), br(),
-                     # --- download button
-                     downloadBttn(outputId = "full_data_download",
-                                  label = "download full data as csv")
+                      # --- user; `month` checkbox buttons
+                      shinyWidgets::checkboxGroupButtons(inputId = "month_selected",
+                                                         label = "Month(s)",
+                                                         choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"),
+                                                         choiceValues = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
+                                                         selected = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
+                                                         status = "danger",
+                                                         checkIcon = list(yes = icon("ok",
+                                                                                     lib = "glyphicon"),
+                                                                          no = icon("remove",
+                                                                                    lib = "glyphicon")),
+                                                         direction = "horizontal",
+                                                         size = "lg"), # large size
+                      # --- user; `bf_season` checkbox buttons
+                      shinyWidgets::checkboxGroupButtons(inputId = "bf_season_selected",
+                                                         label = "Bushfire season(s)",
+                                                         choices = ignition_rasterize_cluster_sf_month %>% distinct(bf_season) %>% pull(bf_season), # unique bushfire seasons
+                                                         selected = c("2016-2017"),
+                                                         status = "danger",
+                                                         checkIcon = list(yes = icon("ok",
+                                                                                     lib = "glyphicon"),
+                                                                          no = icon("remove",
+                                                                                    lib = "glyphicon")),
+                                                         direction = "horizontal",
+                                                         size = "lg"),
+                      br(), br(), br(),
+                      # --- download button
+                      downloadBttn(outputId = "full_data_download",
+                                   label = "download full data as csv")
         ),
 
-        # === column for leaflet map output
-        mainPanel(width = 10,
-                  leaflet::leafletOutput("map",
-                                         height = 500) %>%
-                      shinycssloaders::withSpinner()
+        # === main column for leaflet map output
+        shiny::column(width = 8,
+                      leaflet::leafletOutput("map",
+                                             height = 1000) %>%
+                          shinycssloaders::withSpinner(),
+
+                      shiny::h2("click grid cell to view historical information for that cell"),
+
+                      br(), br(), br(),
+
+                      # --- DT::datatable output ---
+                      DT::DTOutput("datatable_hist") %>%
+                          shinycssloaders::withSpinner()
+        ),
+
+        # === right column; for plotly outputs
+        shiny::column(width = 2,
+                      style = "max-height: 85vh; overflow-y: auto;", # add vertical scroll bar
+
+                      shiny::h2(paste0("Historical values across variables for cell")),
+
+                      # --- `fire_count` vs. `bf_season`
+                      plotly::plotlyOutput("fire_bf_season_plotly") %>%
+                          shinycssloaders::withSpinner(),
+
+                      br(),
+
+                      # --- `fire_count` vs. `month`
+                      plotly::plotlyOutput("fire_month_plotly") %>%
+                          shinycssloaders::withSpinner(),
+
+                      br(),
+
+                      # --- `max_temp` vs. `month`
+                      plotly::plotlyOutput("max_temp_plotly") %>%
+                          shinycssloaders::withSpinner()
+
         )
-    ),
-    br(), br(),
-
-    # ========== DT::datatable ==========
-    fluidRow(
-        DT::DTOutput("datatable") %>%
-            shinycssloaders::withSpinner()
-    ),
-    br(), br(),
-
-
-
-    # ========== plotly ==========
-    fluidRow(
-        # === column for `fire_count` vs. `bf_season` bar plotly
-        column(width = 4,
-               plotly::plotlyOutput("fire_bf_season_plotly") %>%
-                   shinycssloaders::withSpinner()
-        ),
-
-        column(width = 4,
-               plotly::plotlyOutput("fire_month_plotly") %>%
-                   shinycssloaders::withSpinner()
-        ),
-
-        column(width = 4,
-               plotly::plotlyOutput("max_temp_plotly") %>%
-                   shinycssloaders::withSpinner())
     )
-
 )
 
 # **************************************** define server ****************************************
@@ -244,7 +252,7 @@ server <- function(input, output) {
         # create base map
         base_map <- leaflet(options = leafletOptions(
             # set min & max zoom
-            minZoom = 6.45,
+            minZoom = 7.49,
             maxZoom = 11
         )) %>%
             # add provider Tiles
@@ -274,7 +282,7 @@ server <- function(input, output) {
             # add outline of Victoria
             addPolylines(data = vic_map_sf,
                          color = "black",
-                         weight = 3) %>%
+                         weight = 3.5) %>%
 
             # add gridded cell
             addPolygons(data = ignition_rasterize_cluster_bf_season_rct(),
@@ -344,7 +352,7 @@ server <- function(input, output) {
     })
 
     # --- DT::datatable; based on cell clicked
-    output$datatable <- DT::renderDT(
+    output$datatable_hist <- DT::renderDT(
         model_df_id() %>%
             DT::datatable(options = list(scrollX = T, # scroll horizontal
                                          pageLength = 5, #
