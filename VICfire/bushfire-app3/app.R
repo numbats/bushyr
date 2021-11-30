@@ -231,8 +231,8 @@ server <- function(input, output, session) {
     model_df2_temp <- model_df2 %>%
       na.omit() %>%
       # select variables; user toggle
-      select(id, year, month, daily_rain:s0_pct,
-             -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
+      dplyr::select(id, year, month, daily_rain:s0_pct,
+                    -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
       pivot_longer(cols = daily_rain:s0_pct,
                    values_to = "value",
                    names_to = "var") %>%
@@ -244,7 +244,7 @@ server <- function(input, output, session) {
 
     # --- recreate `model_df2` with variables values
     model_df2_temp2 <- model_df2_temp %>%
-      select(id, year, month, var, value) %>%
+      dplyr::select(id, year, month, var, value) %>%
       pivot_wider(names_from = var,
                   values_from = value) %>%
       ungroup() %>%
@@ -259,8 +259,8 @@ server <- function(input, output, session) {
                     .names = "{.col}_2")) %>%
       # join with full data set (with untempered variables)
       na.omit() %>%
-      left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
-                                                      forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+      left_join(., model_df2 %>% na.omit() %>% dplyr::select(id, year, month, # keys
+                                                             forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
                 by = c("id", "year", "month")) %>%
       relocate(fire_count, x, y,
                .after = "year") %>%
@@ -283,8 +283,8 @@ server <- function(input, output, session) {
     model_df2_temp <- model_df2 %>%
       na.omit() %>%
       # select variables; user toggle
-      select(id, year, month, daily_rain:s0_pct,
-             -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
+      dplyr::select(id, year, month, daily_rain:s0_pct,
+                    -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
       pivot_longer(cols = daily_rain:s0_pct,
                    values_to = "value",
                    names_to = "var") %>%
@@ -349,7 +349,7 @@ server <- function(input, output, session) {
 
     # --- recreate `model_df2` with tampered variables
     model_df2_temp2 <- model_df2_temp %>%
-      select(id, year, month, var, value) %>%
+      dplyr::select(id, year, month, var, value) %>%
       pivot_wider(names_from = var,
                   values_from = value) %>%
       ungroup() %>%
@@ -364,8 +364,8 @@ server <- function(input, output, session) {
                     .names = "{.col}_2")) %>%
       # join with full data set (with untempered variables)
       na.omit() %>%
-      left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
-                                                      forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+      left_join(., model_df2 %>% na.omit() %>% dplyr::select(id, year, month, # keys
+                                                             forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
                 by = c("id", "year", "month")) %>%
       relocate(fire_count, x, y,
                .after = "year") %>%
@@ -617,6 +617,7 @@ server <- function(input, output, session) {
   output$datatable <- DT::renderDT(
     model_df_pred() %>%
       sf::st_set_geometry(NULL) %>% # drop geometry column
+      na.omit() %>%
       DT::datatable(caption = htmltools::tags$caption(tags$h3(style = 'caption-side: top; text-align: left;',
                                                               "Prediction Table")),
                     options = list(scrollX = T,
