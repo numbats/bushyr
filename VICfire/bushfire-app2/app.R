@@ -56,41 +56,45 @@ ui <- fluidPage(
     sidebarLayout(
         # === column for user interactivity
         sidebarPanel(width = 2,
-            # --- user; `month` checkbox buttons
-            shinyWidgets::checkboxGroupButtons(inputId = "month_selected",
-                                               label = "Month(s)",
-                                               choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"),
-                                               choiceValues = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
-                                               selected = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
-                                               status = "danger",
-                                               checkIcon = list(yes = icon("ok",
-                                                                           lib = "glyphicon"),
-                                                                no = icon("remove",
-                                                                          lib = "glyphicon")),
-                                               direction = "horizontal",
-                                               size = "lg"), # large size
+                     # --- user; `month` checkbox buttons
+                     shinyWidgets::checkboxGroupButtons(inputId = "month_selected",
+                                                        label = "Month(s)",
+                                                        choiceNames = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar"),
+                                                        choiceValues = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
+                                                        selected = ignition_rasterize_cluster_sf_month %>% distinct(month) %>% pull(month),
+                                                        status = "danger",
+                                                        checkIcon = list(yes = icon("ok",
+                                                                                    lib = "glyphicon"),
+                                                                         no = icon("remove",
+                                                                                   lib = "glyphicon")),
+                                                        direction = "horizontal",
+                                                        size = "lg"), # large size
 
-            shinyWidgets::checkboxGroupButtons(inputId = "bf_season_selected",
-                                               label = "Bushfire season(s)",
-                                               choices = ignition_rasterize_cluster_sf_month %>% distinct(bf_season) %>% pull(bf_season), # unique bushfire seasons
-                                               selected = ignition_rasterize_cluster_sf_month %>% distinct(bf_season) %>% pull(bf_season),
-                                               status = "danger",
-                                               checkIcon = list(yes = icon("ok",
-                                                                           lib = "glyphicon"),
-                                                                no = icon("remove",
-                                                                          lib = "glyphicon")),
-                                               direction = "horizontal",
-                                               size = "lg")
+                     shinyWidgets::checkboxGroupButtons(inputId = "bf_season_selected",
+                                                        label = "Bushfire season(s)",
+                                                        choices = ignition_rasterize_cluster_sf_month %>% distinct(bf_season) %>% pull(bf_season), # unique bushfire seasons
+                                                        selected = c("2016-2017"),
+                                                        status = "danger",
+                                                        checkIcon = list(yes = icon("ok",
+                                                                                    lib = "glyphicon"),
+                                                                         no = icon("remove",
+                                                                                   lib = "glyphicon")),
+                                                        direction = "horizontal",
+                                                        size = "lg"),
+                     br(), br(), br(),
+                     # --- download button
+                     downloadBttn(outputId = "full_data_download",
+                                  label = "download full data as csv")
         ),
 
         # === column for leaflet map output
         mainPanel(width = 10,
-            leaflet::leafletOutput("map",
-                                   height = 500) %>%
-                shinycssloaders::withSpinner()
+                  leaflet::leafletOutput("map",
+                                         height = 500) %>%
+                      shinycssloaders::withSpinner()
         )
     ),
-        br(), br(),
+    br(), br(),
 
     # ========== DT::datatable ==========
     fluidRow(
@@ -107,12 +111,12 @@ ui <- fluidPage(
         column(width = 4,
                plotly::plotlyOutput("fire_bf_season_plotly") %>%
                    shinycssloaders::withSpinner()
-               ),
+        ),
 
         column(width = 4,
                plotly::plotlyOutput("fire_month_plotly") %>%
                    shinycssloaders::withSpinner()
-               ),
+        ),
 
         column(width = 4,
                plotly::plotlyOutput("max_temp_plotly") %>%
@@ -285,10 +289,24 @@ server <- function(input, output) {
     # --- DT::datatable; based on cell clicked
     output$datatable <- DT::renderDT(
         model_df_id() %>%
-            DT::datatable(options = list(scrollX = T,
-                                         pageLength = 5)) %>%
+            DT::datatable(options = list(scrollX = T, # scroll horizontal
+                                         pageLength = 5, #
+                                         dom = "Bfrtip", # dom options
+                                         buttons = c("csv", "excel")), # include `csv` & `excel` buttons; allow user; download data
+                          extensions = "Buttons") %>% # add buttons
             DT::formatRound(columns = 6:33,
                             digits = 3)
+    )
+
+    # --- full data *to download
+    output$full_data_download <- downloadHandler(
+        filename = function(){
+            paste0("data-", Sys.Date(), ".csv")
+        },
+
+        content = function(con){
+            write.csv(model_df3, con)
+        }
     )
 
     # --- plot `fire_count` vs. `bf_season`; bar plotly
