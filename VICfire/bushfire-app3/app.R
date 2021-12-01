@@ -75,6 +75,7 @@ ui <- fluidPage(
                                                 selected = 0,
                                                 post = "%"),
 
+
                   # `et_short_crop`
                   shinyWidgets::sliderTextInput(inputId = "et_short_crop_slider",
                                                 label = tags$h4("Evapotranspiration rate"),
@@ -116,6 +117,13 @@ ui <- fluidPage(
                                                 selected = 0,
                                                 post = "%"),
 
+                  # --- apply button
+                  shinyWidgets::actionBttn(inputId = "apply_bttn",
+                                           label = "Apply",
+                                           style = "fill",
+                                           color = "danger",
+                                           icon = icon("mouse")),
+
                   # --- reset button
                   shinyWidgets::actionBttn(inputId = "reset_bttn",
                                            label = "Reset",
@@ -125,12 +133,13 @@ ui <- fluidPage(
 
                   br(), br(), br(),
 
+
                   # --- information button
-                  actionBttn(inputId = "info_bttn",
-                             label = "",
-                             style = "material-circle",
-                             color = "danger",
-                             icon = icon("info"))
+                  shinyWidgets::actionBttn(inputId = "info_bttn",
+                                           label = "",
+                                           style = "material-circle",
+                                           color = "danger",
+                                           icon = icon("info"))
 
 
     ),
@@ -155,24 +164,30 @@ ui <- fluidPage(
     shiny::column(width = 2,
                   style = "max-height: 85vh; overflow-y: auto;", # add vertical scroll bar
 
-                  shiny::h2("Average monthly variable values from 2016-2018"),
+                  shiny::h2(shiny::textOutput(outputId = "cell_id_text")),
 
                   # `daily_rain`
                   plotly::plotlyOutput("daily_rain_plotly") %>%
                     shinycssloaders::withSpinner(),
 
+                  br(),
+
                   # `max_temp`
                   plotly::plotlyOutput("max_temp_plotly") %>%
                     shinycssloaders::withSpinner(),
+
+                  br(),
 
                   # `et_short_crop`
                   plotly::plotlyOutput("et_short_crop_plotly") %>%
                     shinycssloaders::withSpinner(),
 
+                  br(),
+
                   # `radiation`
                   plotly::plotlyOutput("radiation_plotly") %>%
                     shinycssloaders::withSpinner(),
-                  ),
+    ),
 
   ),
   br(), br()
@@ -230,6 +245,7 @@ server <- function(input, output, session) {
 
   # --- based on user selected month; predict avg. *to extract baseline
   model_df_pred_baseline <- shiny::reactive({
+
     model_df2_temp <- model_df2 %>%
       na.omit() %>%
       # select variables; user toggle
@@ -277,10 +293,11 @@ server <- function(input, output, session) {
       mutate(total = sum(avg_pred)) %>% # baseline total
       mutate(avg_pred_prop = avg_pred / total,
              .after = "avg_pred")
-  })
 
-  # --- based on user selected month & toggled variables; predict avg.
-  model_df_pred <- shiny::reactive({
+  }) # fire event at start up
+
+  # --- based on user selected month & toggled variables; create `model_df`
+  model_df_user <- shiny::eventReactive(input$apply_bttn, {
 
     model_df2_temp <- model_df2 %>%
       na.omit() %>%
@@ -349,8 +366,14 @@ server <- function(input, output, session) {
       mutate(z_updated = pmax((z * sd) + mean, 0)) %>% # value cannot be < 0
       pull(z_updated)
 
-    # --- recreate `model_df2` with tampered variables
-    model_df2_temp2 <- model_df2_temp %>%
+    model_df2_temp
+
+    }, ignoreNULL = F) # fire up at start of app
+
+  # --- recreate `model_df2` with tampered variables(only if apply button ran); run predictions
+  model_df_pred <- reactive({
+
+    model_df2_temp2 <- model_df_user() %>%
       dplyr::select(id, year, month, var, value) %>%
       pivot_wider(names_from = var,
                   values_from = value) %>%
@@ -388,6 +411,7 @@ server <- function(input, output, session) {
     # extract `id` & `geometry` column (i.e. polygon for each grid cell)
     vic_raster_crop_sf %>%
       mutate(id = as_factor(id)) %>%
+
       # join with predicted data
       left_join(., model_df2_temp2)
   })
@@ -614,6 +638,22 @@ server <- function(input, output, session) {
       filter(id == input$map_shape_click$id,
              month == input$month_chosen)
   })
+
+  # --- `renderText`; for plotly column; show cell id picked
+  output$cell_id_text <- shiny::renderText({
+
+    click <- input$map_shape_click
+
+    # if user hasn't clicked
+    if(is.null(click)){
+      paste("click on grid cell to produce plots")
+    }
+    # else (user clicked on grid cell); print
+    else{
+      paste("Average monthly variable values for cell", input$map_shape_click$id)
+    }
+  })
+
 
   # --- DT::datatable; based on cell clicked
   output$datatable <- DT::renderDT(
