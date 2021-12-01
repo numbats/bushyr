@@ -75,6 +75,13 @@ ui <- fluidPage(
                                                 selected = 0,
                                                 post = "%"),
 
+                  # `max_temp`
+                  shinyWidgets::sliderTextInput(inputId = "max_temp_slider",
+                                                label = tags$h4("Max temperature"),
+                                                choices = -100:100,
+                                                selected = 0,
+                                                post = "%"),
+
 
                   # `et_short_crop`
                   shinyWidgets::sliderTextInput(inputId = "et_short_crop_slider",
@@ -83,12 +90,6 @@ ui <- fluidPage(
                                                 selected = 0,
                                                 post = "%"),
 
-                  # `max_temp`
-                  shinyWidgets::sliderTextInput(inputId = "max_temp_slider",
-                                                label = tags$h4("Max temperature"),
-                                                choices = -100:100,
-                                                selected = 0,
-                                                post = "%"),
                   # `radiation`
                   shinyWidgets::sliderTextInput(inputId = "radiation_slider",
                                                 label = tags$h4("Radiation"),
@@ -151,9 +152,7 @@ ui <- fluidPage(
                                          height = 1000) %>%
                     shinycssloaders::withSpinner(),
 
-                  shiny::h2("click grid cell to view prediction information for that cell"),
-
-                  br(), br(), br(),
+                  br(), br(),
 
                   DT::DTOutput("datatable") %>%
                     shinycssloaders::withSpinner()
@@ -186,6 +185,24 @@ ui <- fluidPage(
 
                   # `radiation`
                   plotly::plotlyOutput("radiation_plotly") %>%
+                    shinycssloaders::withSpinner(),
+
+                  br(),
+
+                  # `rh`
+                  plotly::plotlyOutput("rh_plotly") %>%
+                    shinycssloaders::withSpinner(),
+
+                  br(),
+
+                  # `si10`
+                  plotly::plotlyOutput("si10_plotly") %>%
+                    shinycssloaders::withSpinner(),
+
+                  br(),
+
+                  # `s0_pct`
+                  plotly::plotlyOutput("s0_pct_plotly") %>%
                     shinycssloaders::withSpinner(),
     ),
 
@@ -296,7 +313,7 @@ server <- function(input, output, session) {
 
   }) # fire event at start up
 
-  # --- based on user selected month & toggled variables; create `model_df`
+  # --- based on user selected month & toggled variables; create `model_df2`
   model_df_user <- shiny::eventReactive(input$apply_bttn, {
 
     model_df2_temp <- model_df2 %>%
@@ -370,10 +387,10 @@ server <- function(input, output, session) {
 
     }, ignoreNULL = F) # fire up at start of app
 
-  # --- recreate `model_df2` with tampered variables(only if apply button ran); run predictions
-  model_df_pred <- reactive({
+  # --- recreate `model_df2` with tampered variables(only if apply button ran)- join lag variables & untempered variables
+  model_df_user2 <- reactive({
 
-    model_df2_temp2 <- model_df_user() %>%
+    model_df_user() %>%
       dplyr::select(id, year, month, var, value) %>%
       pivot_wider(names_from = var,
                   values_from = value) %>%
@@ -395,8 +412,14 @@ server <- function(input, output, session) {
       relocate(fire_count, x, y,
                .after = "year") %>%
       # filter to month chosen by user
-      filter(month == input$month_chosen) %>%
-      # make predictions with `rf` model
+      filter(month == input$month_chosen)
+  })
+
+  # --- with recreated `model_df2`; run predictions
+  model_df_pred <- reactive({
+
+    # make predictions with `rf` model
+    model_df2_temp2 <- model_df_user2() %>%
       mutate(pred = predict(model, .)$predictions,
              .after = "fire_count") %>%
       group_by(id) %>%
@@ -634,7 +657,7 @@ server <- function(input, output, session) {
   model_df_id <- shiny::eventReactive(input$map_shape_click, { # invalidated; each time; user click grid cell
     # based on user map click
 
-    model_df2_low_avg_high %>% # variable values; low = -10sd // avg.// high = +10 sd
+    model_df2_low_avg_high %>% # variable values; low = -4sd // avg.// high = +4 sd
       filter(id == input$map_shape_click$id,
              month == input$month_chosen)
   })
@@ -650,7 +673,7 @@ server <- function(input, output, session) {
     }
     # else (user clicked on grid cell); print
     else{
-      paste("Average monthly variable values for cell", input$map_shape_click$id)
+      paste("Average & used monthly variable values for cell", input$map_shape_click$id)
     }
   })
 
@@ -659,9 +682,12 @@ server <- function(input, output, session) {
   output$datatable <- DT::renderDT(
     model_df_pred() %>%
       sf::st_set_geometry(NULL) %>% # drop geometry column
+      rename(`cell id` = id,
+             `average pred.` = avg_pred,
+             `average pred. proportion` = avg_pred_prop) %>%
       na.omit() %>%
       DT::datatable(caption = htmltools::tags$caption(tags$h3(style = 'caption-side: top; text-align: left;',
-                                                              "Prediction Table")),
+                                                              "Predictions (Tabular)")),
                     options = list(scrollX = T, # scroll horizontal
                                    pageLength = 5,
                                    dom = "Bfrtip", # dom options
@@ -677,6 +703,8 @@ server <- function(input, output, session) {
   # `daily_rain` plotly
   output$daily_rain_plotly <- plotly::renderPlotly({
 
+    req(input$map_shape_click) # require user to click a grid cell
+
     model_df_id() %>%
       ungroup() %>%
       mutate(month = factor(month,
@@ -688,6 +716,7 @@ server <- function(input, output, session) {
               type = "scatter",
               mode = "lines",
               line = list(color = 'transparent'),
+
               showlegend = FALSE,
               name = 'High') %>%
       add_trace(x = ~year,
@@ -705,12 +734,26 @@ server <- function(input, output, session) {
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
-                name = 'Average') %>%
-      layout(yaxis = list(title = "daily_rain"))
+                name = 'Average',
+                showlegend = T) %>%
+      # add toggled user selection
+      add_trace(x = ~year,
+                y = ~daily_rain,
+                type = "scatter",
+                mode = "line+markers",
+                line = list(color = "#ff69b4"),
+                name = "used",
+                showlegend = T,
+                data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
+                                                   month == input$month_chosen)) %>%  # filter to month_chosen by user
+      layout(yaxis = list(title = "daily rain (mm)"), # y-axis label
+             legend = list(x = 0.43, y = 10)) # add legends
   })
 
   # `max_temp` plotly
   output$max_temp_plotly <- plotly::renderPlotly({
+
+    req(input$map_shape_click) # require user to click a grid cell
 
     model_df_id() %>%
       ungroup() %>%
@@ -741,11 +784,22 @@ server <- function(input, output, session) {
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
                 name = 'Average') %>%
-      layout(yaxis = list(title = "max_temp"))
+      # add toggled user selection
+      add_trace(x = ~year,
+                y = ~max_temp,
+                type = "scatter",
+                mode = "line+markers",
+                line = list(color = "#ff69b4"),
+                name = "tampered values",
+                data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
+                                                   month == input$month_chosen)) %>%  # filter to month_chosen by user
+      layout(yaxis = list(title = "max temp (°C)")) # y-axis label
   })
 
   # `et_short_crop` plotly
   output$et_short_crop_plotly <- plotly::renderPlotly({
+
+    req(input$map_shape_click) # require user to click a grid cell
 
     model_df_id() %>%
       ungroup() %>%
@@ -760,6 +814,7 @@ server <- function(input, output, session) {
               line = list(color = 'transparent'),
               showlegend = FALSE,
               name = 'High') %>%
+
       add_trace(x = ~year,
                 y = ~et_short_crop_low,
                 type = 'scatter',
@@ -769,6 +824,7 @@ server <- function(input, output, session) {
                 line = list(color = 'transparent'),
                 showlegend = FALSE,
                 name = 'Low') %>%
+
       # add average line + markers
       add_trace(x = ~year,
                 y = ~et_short_crop_avg,
@@ -776,10 +832,21 @@ server <- function(input, output, session) {
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
                 name = 'Average') %>%
-      layout(yaxis = list(title = "et_short_crop"))
+      # add toggled user selection
+      add_trace(x = ~year,
+                y = ~et_short_crop,
+                type = "scatter",
+                mode = "line+markers",
+                line = list(color = "#ff69b4"),
+                name = "tampered values",
+                data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
+                                                   month == input$month_chosen)) %>%  # filter to month_chosen by user
+      layout(yaxis = list(title = "evapotranspiration (mm)")) # y-axis label
   })
 
   output$radiation_plotly <- plotly::renderPlotly({
+
+    req(input$map_shape_click) # require user to click a grid cell
 
     model_df_id() %>%
       ungroup() %>%
@@ -810,8 +877,154 @@ server <- function(input, output, session) {
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
                 name = 'Average') %>%
-      layout(yaxis = list(title = "et_short_crop"))
+      # add toggled user selection
+      add_trace(x = ~year,
+                y = ~radiation,
+                type = "scatter",
+                mode = "line+markers",
+                line = list(color = "#ff69b4"),
+                name = "tampered values",
+                data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
+                                                   month == input$month_chosen)) %>%  # filter to month_chosen by user
+      layout(yaxis = list(title = "radiation (MJ/m^2)")) # y-axis label
   })
+
+  output$rh_plotly <- plotly::renderPlotly({
+
+    req(input$map_shape_click) # require user to click a grid cell
+
+    model_df_id() %>%
+      ungroup() %>%
+      mutate(month = factor(month,
+                            levels = c(10, 11, 12, 1, 2, 3))) %>%
+      # add high & low filled
+      plot_ly(data = .,
+              x = ~year,
+              y = ~rh_high,
+              type = "scatter",
+              mode = "lines",
+              line = list(color = 'transparent'),
+              showlegend = FALSE,
+              name = 'High') %>%
+      add_trace(x = ~year,
+                y = ~rh_low,
+                type = 'scatter',
+                mode = 'lines',
+                fill = 'tonexty',
+                fillcolor='rgba(0,100,80,0.2)',
+                line = list(color = 'transparent'),
+                showlegend = FALSE,
+                name = 'Low') %>%
+      # add average line + markers
+      add_trace(x = ~year,
+                y = ~rh_avg,
+                type = 'scatter',
+                mode = 'lines+markers',
+                line = list(color='rgb(0,100,80)'),
+                name = 'Average') %>%
+      # add toggled user selection
+      add_trace(x = ~year,
+                y = ~rh,
+                type = "scatter",
+                mode = "line+markers",
+                line = list(color = "#ff69b4"),
+                name = "tampered values",
+                data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
+                                                   month == input$month_chosen)) %>%  # filter to month_chosen by user
+      layout(yaxis = list(title = "relative humidity (%)")) # yaxis label
+  })
+
+  output$si10_plotly <- plotly::renderPlotly({
+
+    req(input$map_shape_click) # require user to click a grid cell
+
+    model_df_id() %>%
+      ungroup() %>%
+      mutate(month = factor(month,
+                            levels = c(10, 11, 12, 1, 2, 3))) %>%
+      # add high & low filled
+      plot_ly(data = .,
+              x = ~year,
+              y = ~si10_high,
+              type = "scatter",
+              mode = "lines",
+              line = list(color = 'transparent'),
+              showlegend = FALSE,
+              name = 'High') %>%
+      add_trace(x = ~year,
+                y = ~si10_low,
+                type = 'scatter',
+                mode = 'lines',
+                fill = 'tonexty',
+                fillcolor='rgba(0,100,80,0.2)',
+                line = list(color = 'transparent'),
+                showlegend = FALSE,
+                name = 'Low') %>%
+      # add average line + markers
+      add_trace(x = ~year,
+                y = ~si10_avg,
+                type = 'scatter',
+                mode = 'lines+markers',
+                line = list(color='rgb(0,100,80)'),
+                name = 'Average') %>%
+      # add toggled user selection
+      add_trace(x = ~year,
+                y = ~si10,
+                type = "scatter",
+                mode = "line+markers",
+                line = list(color = "#ff69b4"),
+                name = "tampered values",
+                data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
+                                                   month == input$month_chosen)) %>%  # filter to month_chosen by user
+      layout(yaxis = list(title = "10m wind speed (m/s)")) # yaxis label
+  })
+
+  output$s0_pct_plotly <- plotly::renderPlotly({
+
+    req(input$map_shape_click) # require user to click a grid cell
+
+    model_df_id() %>%
+      ungroup() %>%
+      mutate(month = factor(month,
+                            levels = c(10, 11, 12, 1, 2, 3))) %>%
+      # add high & low filled
+      plot_ly(data = .,
+              x = ~year,
+              y = ~s0_pct_high,
+              type = "scatter",
+              mode = "lines",
+              line = list(color = 'transparent'),
+              showlegend = FALSE,
+              name = 'High') %>%
+      add_trace(x = ~year,
+                y = ~s0_pct_low,
+                type = 'scatter',
+                mode = 'lines',
+                fill = 'tonexty',
+                fillcolor='rgba(0,100,80,0.2)',
+                line = list(color = 'transparent'),
+                showlegend = FALSE,
+                name = 'Low') %>%
+      # add average line + markers
+      add_trace(x = ~year,
+                y = ~s0_pct_avg,
+                type = 'scatter',
+                mode = 'lines+markers',
+                line = list(color='rgb(0,100,80)'),
+                name = 'Average') %>%
+      # add toggled user selection
+      add_trace(x = ~year,
+                y = ~s0_pct,
+                type = "scatter",
+                mode = "line+markers",
+                line = list(color = "#ff69b4"),
+                name = "tampered values",
+                data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
+                                                   month == input$month_chosen)) %>%  # filter to month_chosen by user
+      layout(yaxis = list(title = "surface soil moisture (% full)")) # yaxis label
+  })
+
+
 
 
 }
