@@ -9,12 +9,14 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(ranger)
+load(here::here("eda.RData"))
+load(here::here("ida.RData"))
 ```
 
 ```{r}
-model <- readRDS(here::here("VICfire/model/rfmodel_final.rds"))
+model <- readRDS("rfmodel_final.rds")
 
-data <- read.csv(here::here("VICfire/data/model_df2.csv")) %>%
+data <- read.csv("model_df2.csv") %>%
   na.omit()
 ```
 
@@ -61,6 +63,7 @@ for (i in 1:length(id_list)) {
   for (j in -5:5) {
     new_values <- (j * sd) + mean
     data_id$max_temp <- new_values
+    data_id <- data_id %>% filter(max_temp > 0)
     predicted_values <- mean(predict(model, data_id)$predictions)
     
     new_data <-tibble(id = id_list[i],
@@ -83,45 +86,6 @@ combined_data %>%
 ggplotly()
 ```
 
-```{r}
-data_avg <- data %>% 
-  dplyr::select(-year) %>%
-  group_by(id, month) %>%
-  summarise_all("mean")
-
-combined_data <- data.frame()
-for (i in 1:length(id_list)) {
-  id = id_list[i]
-  data_id <- data_avg %>% filter(id == id_list[i])
-  mean <- (data_sd %>% filter(id == id_list[i]))$max_temp_mean
-  sd <- (data_sd %>% filter(id == id_list[i]))$max_temp_sd
-  changed_data <- data.frame()
-  for (j in -5:5) {
-    new_values <- (j * sd) + mean
-    data_id$max_temp <- new_values
-    predicted_values <- mean(predict(model, data_id)$predictions)
-    
-    new_data <-tibble(id = id_list[i],
-                      sd = j,
-                      predict = predicted_values)
-    
-    changed_data <- changed_data %>% bind_rows(new_data)
-  }
-  combined_data <- combined_data %>% rbind(changed_data)
-}
-
-library(plotly)
-combined_data %>% 
-  group_by(id) %>%
-  ggplot(aes(x = sd,
-             y = predict,
-             color = id,
-             group = id)) +
-  geom_point() + geom_line()
-ggplotly()
-
-data_id
-```
 
 ## radiation
 ```{r}
@@ -135,6 +99,7 @@ for (i in 1:length(id_list)) {
   for (j in -5:5) {
     new_values <- (j * sd) + mean
     data_id$radiation <- new_values
+    data_id <- data_id %>% filter(radiation > 0)
     predicted_values <- mean(predict(model, data_id)$predictions)
     
     new_data <-tibble(id = id_list[i],
@@ -169,6 +134,7 @@ for (i in 1:length(id_list)) {
   for (j in -5:5) {
     new_values <- (j * sd) + mean
     data_id$rh <- new_values
+    data_id <- data_id %>% filter(rh > 0)
     predicted_values <- mean(predict(model, data_id)$predictions)
     
     new_data <-tibble(id = id_list[i],
@@ -190,6 +156,10 @@ combined_data3 %>%
 ggplotly()
 ```
 
+```{r}
+save(data_sd, file = "data_sd.RData")
+```
+
 
 ## daily_rain
 ```{r}
@@ -203,11 +173,13 @@ for (i in 1:length(id_list)) {
   for (j in -5:5) {
     new_values <- (j * sd) + mean
     data_id$daily_rain <- new_values
+    
     predicted_values <- mean(predict(model, data_id)$predictions)
     
     new_data <-tibble(id = id_list[i],
                       sd = j,
-                      predict = predicted_values)
+                      predict = predicted_values,
+                      daily_rain = new_values)
     
     changed_data <- changed_data %>% bind_rows(new_data)
   }
@@ -215,6 +187,7 @@ for (i in 1:length(id_list)) {
 }
 
 combined_data4 %>% 
+  filter(daily_rain >0) %>%
   group_by(id) %>%
   ggplot(aes(x = sd,
              y = predict,
@@ -222,6 +195,10 @@ combined_data4 %>%
              group = id)) +
   geom_point() + geom_line()
 ggplotly()
+```
+
+```{r}
+length(data)
 ```
 
 
@@ -249,6 +226,7 @@ for (i in 1:length(id_list)) {
 }
 
 combined_data5 %>% 
+  filter(et_short_crop >0) %>%
   group_by(id) %>%
   ggplot(aes(x = sd,
              y = predict,
@@ -309,7 +287,8 @@ for (i in 1:length(id_list)) {
     
     new_data <-tibble(id = id_list[i],
                       sd = j,
-                      predict = predicted_values)
+                      predict = predicted_values,
+                      si10 = new_values)
     
     changed_data <- changed_data %>% bind_rows(new_data)
   }
@@ -317,6 +296,7 @@ for (i in 1:length(id_list)) {
 }
 
 combined_data7 %>% 
+  filter(si10 > 0 ) %>%
   group_by(id) %>%
   ggplot(aes(x = sd,
              y = predict,
@@ -343,7 +323,8 @@ for (i in 1:length(id_list)) {
     
     new_data <-tibble(id = id_list[i],
                       sd = j,
-                      predict = predicted_values)
+                      predict = predicted_values,
+                      s0_pct = new_values)
     
     changed_data <- changed_data %>% bind_rows(new_data)
   }
@@ -351,6 +332,174 @@ for (i in 1:length(id_list)) {
 }
 
 combined_data8 %>% 
+  filter(s0_pct > 0) %>%
+  group_by(id) %>%
+  ggplot(aes(x = sd,
+             y = predict,
+             color = id,
+             group = id)) +
+  geom_point() + geom_line()
+ggplotly()
+```
+
+# max_temp
+```{r}
+data2 <- data %>% mutate(pred = predict(model, data)$predictions,
+                         sd = "0")
+
+data_sd1 <- data
+
+# changing all the values
+data_sd1 <- data.frame()
+for (i in 1:length(id_list)) {
+  data_id <- data %>% filter(id == id_list[i])
+  mean <- (data_sd %>% filter(id == id_list[i]))$max_temp_mean
+  sd <- (data_sd %>% filter(id == id_list[i]))$max_temp_sd
+
+  data_changed <- data_id %>%
+    mutate(max_temp = max_temp + sd)
+  
+  data_changed <- data_changed %>% bind_cols(pred = predict(model, data_changed)$predictions)
+    
+  data_sd1 <- data_sd1 %>% rbind(data_changed)
+}
+
+data_sd1 <- data_sd1 %>% mutate(sd = "+1")
+
+data_sdm1 <- data.frame()
+for (i in 1:length(id_list)) {
+  data_id <- data %>% filter(id == id_list[i])
+  mean <- (data_sd %>% filter(id == id_list[i]))$max_temp_mean
+  sd <- (data_sd %>% filter(id == id_list[i]))$max_temp_sd
+
+  data_changed <- data_id %>%
+    mutate(max_temp = max_temp - sd)
+  
+  data_changed <- data_changed %>% bind_cols(pred = predict(model, data_changed)$predictions)
+    
+  data_sdm1 <- data_sdm1 %>% rbind(data_changed)
+}
+
+data_sdm1 <- data_sdm1 %>% mutate(sd = "-1")
+
+data2 <- data2 %>% bind_rows(data_sd1, data_sdm1)
+
+
+```
+
+```{r}
+data2 %>%
+  ggplot(aes(x = max_temp, 
+             y = pred,
+             colour = sd)) +
+  geom_point() +
+  facet_grid(month ~ year, scales = "free") +
+  ggtitle("Predicted values for changes in max_temp")
+```
+
+```{r}
+data2 %>%
+  mutate(sd = factor(sd, levels = c("-1", "0", "+1"))) %>%
+  filter(id == 1) %>%
+  ggplot(aes(x = sd,
+             y = pred)) +
+  geom_point() +
+  facet_grid(month ~ year, scales = "free")
+  
+```
+
+# daily_rain
+```{r}
+data3 <- data %>% mutate(pred = predict(model, data)$predictions,
+                         sd = "0")
+
+# changing all the values
+data_sd1_rain <- data.frame()
+for (i in 1:length(id_list)) {
+  data_id <- data %>% filter(id == id_list[i])
+  mean <- (data_sd %>% filter(id == id_list[i]))$daily_rain_mean
+  sd <- (data_sd %>% filter(id == id_list[i]))$daily_rain_sd
+
+  data_changed <- data_id %>%
+    mutate(daily_rain = daily_rain + sd)
+  
+  data_changed <- data_changed %>% bind_cols(pred = predict(model, data_changed)$predictions)
+    
+  data_sd1_rain <- data_sd1_rain %>% rbind(data_changed)
+}
+
+data_sd1_rain <- data_sd1_rain %>% mutate(sd = "+1")
+
+data_sdm1_rain <- data.frame()
+for (i in 1:length(id_list)) {
+  data_id <- data %>% filter(id == id_list[i])
+  mean <- (data_sd %>% filter(id == id_list[i]))$daily_rain_mean
+  sd <- (data_sd %>% filter(id == id_list[i]))$daily_rain_sd
+
+  data_changed <- data_id %>%
+    mutate(daily_rain = daily_rain - sd)
+  
+  data_changed <- data_changed %>% bind_cols(pred = predict(model, data_changed)$predictions)
+    
+  data_sdm1_rain <- data_sdm1_rain %>% rbind(data_changed)
+}
+
+data_sdm1_rain <- data_sdm1_rain %>% mutate(sd = "-1")
+
+data3 <- data3 %>% bind_rows(data_sd1_rain, data_sdm1_rain)
+
+
+```
+
+```{r}
+data3 %>%
+  ggplot(aes(x = daily_rain, 
+             y = pred,
+             colour = sd)) +
+  geom_point() +
+  facet_grid(month ~ year, scales = "free") +
+  ggtitle("Predicted values for changes in max_temp")
+```
+
+```{r}
+data3 %>%
+  mutate(sd = factor(sd, levels = c("-1", "0", "+1"))) %>%
+  filter(id == 1) %>%
+  ggplot(aes(x = sd,
+             y = pred)) +
+  geom_point() +
+  facet_grid(month ~ year, scales = "free")
+  
+```
+
+## changes on all values instead of average values
+```{r}
+combined_data9 <- data.frame()
+for (i in 1:length(id_list)) {
+  data_id <- data %>% filter(id == id_list[i])
+  mean <- (data_sd %>% filter(id == id_list[i]))$max_temp_mean
+  sd <- (data_sd %>% filter(id == id_list[i]))$max_temp_sd
+  df <- data.frame()
+  for (j in -5:5) {
+    
+    changed_data <- data_id %>% mutate(max_temp = max_temp + (j *sd))
+  
+  changed_data <- changed_data %>% bind_cols(pred = predict(model, changed_data)$predictions)
+    
+    predicted_values <- mean(changed_data$pred)
+    
+    new_data <-tibble(id = id_list[i],
+                      sd = j,
+                      predict = predicted_values,
+                      max_temp = mean(changed_data$max_temp))
+    
+    df <- df %>% bind_rows(new_data)
+  }
+  combined_data9 <- combined_data9 %>% rbind(df)
+}
+
+combined_data9 %>% 
+  filter(max_temp > 0) %>%
   group_by(id) %>%
   ggplot(aes(x = sd,
              y = predict,
@@ -361,5 +510,111 @@ ggplotly()
 ```
 
 
+```{r}
+combined_data10 <- data.frame()
+for (i in 1:length(id_list)) {
+  data_id <- data %>% filter(id == id_list[i])
+  mean <- (data_sd %>% filter(id == id_list[i]))$radiation_mean
+  sd <- (data_sd %>% filter(id == id_list[i]))$radiation_sd
+  df <- data.frame()
+  for (j in -5:5) {
+    
+    changed_data <- data_id %>% mutate(radiation = radiation + (j *sd))
+  
+  changed_data <- changed_data %>% bind_cols(pred = predict(model, changed_data)$predictions)
+    
+    predicted_values <- mean(changed_data$pred)
+    
+    new_data <-tibble(id = id_list[i],
+                      sd = j,
+                      predict = predicted_values,
+                      radiation = mean(changed_data$radiation))
+    
+    df <- df %>% bind_rows(new_data)
+  }
+  combined_data10 <- combined_data10 %>% rbind(df)
+}
 
+combined_data10 %>% 
+  filter(radiation > 0) %>%
+  group_by(id) %>%
+  ggplot(aes(x = sd,
+             y = predict,
+             color = id,
+             group = id)) +
+  geom_point() + geom_line()
+ggplotly()
+```
+
+```{r}
+combined_data11 <- data.frame()
+for (i in 1:length(id_list)) {
+  data_id <- data %>% filter(id == id_list[i])
+  mean <- (data_sd %>% filter(id == id_list[i]))$daily_rain_mean
+  sd <- (data_sd %>% filter(id == id_list[i]))$daily_rain_sd
+  df <- data.frame()
+  for (j in -5:5) {
+    
+    changed_data <- data_id %>% mutate(daily_rain = daily_rain + (j *sd))
+  
+  changed_data <- changed_data %>% bind_cols(pred = predict(model, changed_data)$predictions)
+    
+    predicted_values <- mean(changed_data$pred)
+    
+    new_data <-tibble(id = id_list[i],
+                      sd = j,
+                      predict = predicted_values,
+                      daily_rain = mean(changed_data$daily_rain))
+    
+    df <- df %>% bind_rows(new_data)
+  }
+  combined_data11 <- combined_data11 %>% rbind(df)
+}
+
+combined_data11 %>% 
+  filter(daily_rain > 0) %>%
+  group_by(id) %>%
+  ggplot(aes(x = sd,
+             y = predict,
+             color = id,
+             group = id)) +
+  geom_point() + geom_line()
+ggplotly()
+```
+
+
+```{r}
+data_sd1 <- data
+for (i in 1:length(id_list)) {
+  mean <- (data_sd %>% filter(id == id_list[i]))$max_temp_mean
+  sd <- (data_sd %>% filter(id == id_list[i]))$max_temp_sd
+  data_sd1$max_temp[data_sd1$year == 2021 & data_sd1$month == 3 & data_sd1$id == id_list[i]] <- (data_sd1 %>% filter(id == id_list[i] & year == 2021 & month == 3))$max_temp + sd
+}
+
+data_sd1 <- 
+```
+
+
+```{r}
+ (data_sd1 %>% filter(id == 1 & year == 2021 & month == 3))$max_temp 
+```
+
+
+```{r}
+data %>%
+  ggplot(aes(x = max_temp, 
+             y = fire_count)) +
+  geom_point() +
+  facet_grid(year ~ month)
+```
+
+```{r}
+data_predicted <- data %>% mutate( predictions = predict(model, data)$predictions)
+
+data_predicted %>%
+  ggplot(aes(x = max_temp, 
+             y = predictions)) +
+  geom_point() +
+  facet_grid(year ~ month)
+```
 
