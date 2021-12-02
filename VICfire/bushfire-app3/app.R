@@ -156,7 +156,6 @@ ui <- fluidPage(
 
                   DT::DTOutput("datatable") %>%
                     shinycssloaders::withSpinner()
-
     ),
 
     # === right column; for plotly outputs
@@ -215,7 +214,7 @@ server <- function(input, output, session) {
 
   shiny::observeEvent(input$info_bttn, {
     # show a modal; when button pressed
-    shinyalert::shinyalert(title = "Information- This is a bushfire risk prediction map",
+    shinyalert::shinyalert(title = "The bushfire risk prediction map is based on modelling the historical fire ignitions and weather/climate variables from 2016-2021",
                            size = "m", # size of modal
                            showConfirmButton = T, # no confirm button
                            closeOnEsc = T,
@@ -385,7 +384,7 @@ server <- function(input, output, session) {
 
     model_df2_temp
 
-    }, ignoreNULL = F) # fire up at start of app
+  }, ignoreNULL = F) # fire up at start of app
 
   # --- recreate `model_df2` with tampered variables(only if apply button ran)- join lag variables & untempered variables
   model_df_user2 <- reactive({
@@ -414,6 +413,8 @@ server <- function(input, output, session) {
       # filter to month chosen by user
       filter(month == input$month_chosen)
   })
+
+
 
   # --- with recreated `model_df2`; run predictions
   model_df_pred <- reactive({
@@ -539,6 +540,46 @@ server <- function(input, output, session) {
                              style = "pretty")
   })
 
+  # --- create avg. values; based on user click map *shown in pop-up
+  avg_popup_vaues_df <- shiny::reactive({
+
+    click <- input$map_shape_click
+
+    # if; user hasn't clicked
+    if(is.null(click)){
+      # pass
+    }
+
+    else{
+      # based on user map click
+      model_df_user2() %>%
+        filter(id == input$map_shape_click$id) %>%
+        summarise(across(.cols = daily_rain:s0_pct,
+                         .fns = mean))
+    }
+
+  })
+
+  avg_popup_values <- reactiveValues(
+    daily_rain_avg = 0,
+    max_temp_avg = 0,
+    et_short_crop_avg = 0,
+    radiation_avg = 0,
+    rh_avg = 0,
+    si10_avg = 0,
+    s0_pct_avg = 0)
+
+  shiny::observe({
+    avg_popup_values$daily_rain_avg <- avg_popup_vaues_df()$daily_rain
+    avg_popup_values$max_temp_avg <- avg_popup_vaues_df()$max_temp
+    avg_popup_values$et_short_crop_avg <- avg_popup_vaues_df()$et_short_crop
+    avg_popup_values$radiation_avg <- avg_popup_vaues_df()$radiation
+    avg_popup_values$rh_avg <- avg_popup_vaues_df()$rh
+    avg_popup_values$si10_avg <- avg_popup_vaues_df()$si10
+    avg_popup_values$s0_pct_avg <- avg_popup_vaues_df()$s0_pct
+  })
+
+
   output$map <- leaflet::renderLeaflet({
 
     # ---  palette create
@@ -592,9 +633,9 @@ server <- function(input, output, session) {
                   fillOpacity = 0.4,
                   color = ~pal(avg_pred_prop), # fill by  avg. predicted proportions; using above palette
                   popup = ~paste0("<h3 style='font-size:5; color:#1E90FF'><b> id: ", id, "</b></h3>", "<br/>",
-                                  "<h3 style='font-size:5'><b>predicted fire ignitions baseline total for month </b>", input$month_chosen, "= ", round(total, 2), "</h3>", "<br/>",
+                                  "<h4 style='font-size:5'><b>predicted baseline total for the month </b>", "= ", round(total, 2), "</h3>", "<br/>",
                                   # "<h3 style='font-size:5'><b>number of predicted ignitions: </b>", round(avg_pred_prop, 3), "</h3>",
-                                  "<h3 style='font-size:5'><b>If there were 1,000 fire ignitions, ", round(1000*(avg_pred/total), 2), " is predicted to occur in this grid cell </h3>")) %>% # click pop-up texts
+                                  "<h4 style='font-size:5'><b>If there were 1,000 fire ignitions, ", round(1000*(avg_pred/total), 2), " is predicted to occur in this grid cell </h3>")) %>% # click pop-up texts
 
       # --- add circle markers; each `bf_season` as a layer
       # 2016
@@ -662,6 +703,7 @@ server <- function(input, output, session) {
              month == input$month_chosen)
   })
 
+
   # --- `renderText`; for plotly column; show cell id picked
   output$cell_id_text <- shiny::renderText({
 
@@ -669,11 +711,11 @@ server <- function(input, output, session) {
 
     # if user hasn't clicked
     if(is.null(click)){
-      paste("click on grid cell to produce plots")
+      paste("click on grid cell to show plots")
     }
     # else (user clicked on grid cell); print
     else{
-      paste("Average & used monthly variable values for cell", input$map_shape_click$id)
+      paste("Actual & used monthly variable values for cell", input$map_shape_click$id)
     }
   })
 
@@ -698,7 +740,21 @@ server <- function(input, output, session) {
   )
 
 
-  # --- plot variables of low = -10sd// avg.// high = +10sd
+  # === plotlys; variables of low = -4sd// avg.// high = +4sd
+
+  # --- create function; draw diagonal line
+  hline <- function(y = 0) {
+    list(
+      type = "line",
+      x0 = 0,
+      x1 = 1,
+      xref = "paper",
+      y0 = y,
+      y1 = y,
+      line = list(color = "#ff69b4",
+                  dash = "dash")
+    )
+  }
 
   # `daily_rain` plotly
   output$daily_rain_plotly <- plotly::renderPlotly({
@@ -734,7 +790,7 @@ server <- function(input, output, session) {
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
-                name = 'Average',
+                name = 'Actual',
                 showlegend = T) %>%
       # add toggled user selection
       add_trace(x = ~year,
@@ -747,8 +803,11 @@ server <- function(input, output, session) {
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
       layout(yaxis = list(title = "daily rain (mm)"), # y-axis label
-             legend = list(x = 0.43, y = 10)) # add legends
+             legend = list(x = 0.43, y = 10), # add legends
+             shapes = list(hline(avg_popup_values$daily_rain_avg))) # dash horizontal line @ avg. value
   })
+
+
 
   # `max_temp` plotly
   output$max_temp_plotly <- plotly::renderPlotly({
@@ -783,7 +842,7 @@ server <- function(input, output, session) {
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
-                name = 'Average') %>%
+                name = 'Actual') %>%
       # add toggled user selection
       add_trace(x = ~year,
                 y = ~max_temp,
@@ -793,7 +852,8 @@ server <- function(input, output, session) {
                 name = "tampered values",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
-      layout(yaxis = list(title = "max temp (°C)")) # y-axis label
+      layout(yaxis = list(title = "max temp (°C)"), # y-axis label
+             shapes = list(hline(avg_popup_values$max_temp_avg))) # dash horizontal line @ avg. value
   })
 
   # `et_short_crop` plotly
@@ -831,7 +891,7 @@ server <- function(input, output, session) {
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
-                name = 'Average') %>%
+                name = 'Actual') %>%
       # add toggled user selection
       add_trace(x = ~year,
                 y = ~et_short_crop,
@@ -841,7 +901,8 @@ server <- function(input, output, session) {
                 name = "tampered values",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
-      layout(yaxis = list(title = "evapotranspiration (mm)")) # y-axis label
+      layout(yaxis = list(title = "evapotranspiration (mm)"), # y-axis label
+             shapes = list(hline(avg_popup_values$et_short_crop_avg))) # dash horizontal line @ avg. value
   })
 
   output$radiation_plotly <- plotly::renderPlotly({
@@ -876,7 +937,7 @@ server <- function(input, output, session) {
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
-                name = 'Average') %>%
+                name = 'Actual') %>%
       # add toggled user selection
       add_trace(x = ~year,
                 y = ~radiation,
@@ -886,7 +947,8 @@ server <- function(input, output, session) {
                 name = "tampered values",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
-      layout(yaxis = list(title = "radiation (MJ/m^2)")) # y-axis label
+      layout(yaxis = list(title = "radiation (MJ/m^2)"), # y-axis label
+             shapes = list(hline(avg_popup_values$radiation_avg))) # dash horizontal line @ avg. value
   })
 
   output$rh_plotly <- plotly::renderPlotly({
@@ -921,7 +983,7 @@ server <- function(input, output, session) {
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
-                name = 'Average') %>%
+                name = 'Actual') %>%
       # add toggled user selection
       add_trace(x = ~year,
                 y = ~rh,
@@ -931,7 +993,8 @@ server <- function(input, output, session) {
                 name = "tampered values",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
-      layout(yaxis = list(title = "relative humidity (%)")) # yaxis label
+      layout(yaxis = list(title = "relative humidity (%)"), # yaxis label
+             shapes = list(hline(avg_popup_values$rh_avg)))
   })
 
   output$si10_plotly <- plotly::renderPlotly({
@@ -966,7 +1029,7 @@ server <- function(input, output, session) {
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
-                name = 'Average') %>%
+                name = 'Actual') %>%
       # add toggled user selection
       add_trace(x = ~year,
                 y = ~si10,
@@ -976,7 +1039,8 @@ server <- function(input, output, session) {
                 name = "tampered values",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
-      layout(yaxis = list(title = "10m wind speed (m/s)")) # yaxis label
+      layout(yaxis = list(title = "10m wind speed (m/s)"), # yaxis label
+             shapes = list(hline(avg_popup_values$si10_avg))) # dash horizontal line @ avg. value
   })
 
   output$s0_pct_plotly <- plotly::renderPlotly({
@@ -1011,7 +1075,7 @@ server <- function(input, output, session) {
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
-                name = 'Average') %>%
+                name = 'Actual') %>%
       # add toggled user selection
       add_trace(x = ~year,
                 y = ~s0_pct,
@@ -1021,7 +1085,8 @@ server <- function(input, output, session) {
                 name = "tampered values",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
-      layout(yaxis = list(title = "surface soil moisture (% full)")) # yaxis label
+      layout(yaxis = list(title = "surface soil moisture (% full)"), # yaxis label
+             shapes = list(hline(avg_popup_values$s0_pct_avg))) # dash horizontal line @ avg. value
   })
 
 
