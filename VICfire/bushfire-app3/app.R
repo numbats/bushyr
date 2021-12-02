@@ -282,20 +282,28 @@ server <- function(input, output, session) {
       pivot_wider(names_from = var,
                   values_from = value) %>%
       ungroup() %>%
-      # compute 1st lag
-      mutate(across(.cols = daily_rain:s0_pct,
-                    .fns = ~lag(.x),
-                    .names = "{.col}_1")) %>%
-      # compute 2nd lag
-      mutate(across(.cols = daily_rain:s0_pct,
-                    .fns = ~lag(.x,
-                                n = 2),
-                    .names = "{.col}_2")) %>%
-      # join with full data set (with untempered variables)
-      na.omit() %>%
-      left_join(., model_df2 %>% na.omit() %>% dplyr::select(id, year, month, # keys
-                                                             forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
-                by = c("id", "year", "month")) %>%
+
+      # ***changing variable values do NOT change lag variable values; comment away here***
+      # # compute 1st lag
+      # mutate(across(.cols = daily_rain:s0_pct,
+      #               .fns = ~lag(.x),
+      #               .names = "{.col}_1")) %>%
+      # # compute 2nd lag
+      # mutate(across(.cols = daily_rain:s0_pct,
+      #               .fns = ~lag(.x,
+      #                           n = 2),
+      #               .names = "{.col}_2")) %>%
+      # # join with full data set (with untempered variables)
+      # na.omit() %>%
+      # left_join(., model_df2 %>% na.omit() %>% dplyr::select(id, year, month, # keys
+      #                                                        forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+      #           by = c("id", "year", "month")) %>%
+    # *** replace by this ***
+    left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+                                                    x, y, fire_count, lai_lv, lai_hv, forest:last_col()), # variables to join
+              by = c("id", "year", "month"))  %>%
+      # *** end ***
+
       relocate(fire_count, x, y,
                .after = "year") %>%
       # filter to month chosen by user
@@ -849,7 +857,7 @@ server <- function(input, output, session) {
                 type = "scatter",
                 mode = "line+markers",
                 line = list(color = "#ff69b4"),
-                name = "tampered values",
+                name = "used",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
       layout(yaxis = list(title = "max temp (°C)"), # y-axis label
@@ -898,7 +906,7 @@ server <- function(input, output, session) {
                 type = "scatter",
                 mode = "line+markers",
                 line = list(color = "#ff69b4"),
-                name = "tampered values",
+                name = "used",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
       layout(yaxis = list(title = "evapotranspiration (mm)"), # y-axis label
@@ -944,7 +952,7 @@ server <- function(input, output, session) {
                 type = "scatter",
                 mode = "line+markers",
                 line = list(color = "#ff69b4"),
-                name = "tampered values",
+                name = "used",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
       layout(yaxis = list(title = "radiation (MJ/m^2)"), # y-axis label
@@ -990,7 +998,7 @@ server <- function(input, output, session) {
                 type = "scatter",
                 mode = "line+markers",
                 line = list(color = "#ff69b4"),
-                name = "tampered values",
+                name = "used",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
       layout(yaxis = list(title = "relative humidity (%)"), # yaxis label
@@ -1036,7 +1044,7 @@ server <- function(input, output, session) {
                 type = "scatter",
                 mode = "line+markers",
                 line = list(color = "#ff69b4"),
-                name = "tampered values",
+                name = "used",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
       layout(yaxis = list(title = "10m wind speed (m/s)"), # yaxis label
@@ -1082,7 +1090,7 @@ server <- function(input, output, session) {
                 type = "scatter",
                 mode = "line+markers",
                 line = list(color = "#ff69b4"),
-                name = "tampered values",
+                name = "used",
                 data = model_df_user2() %>% filter(id == input$map_shape_click$id, # filter to user clicked cell
                                                    month == input$month_chosen)) %>%  # filter to month_chosen by user
       layout(yaxis = list(title = "surface soil moisture (% full)"), # yaxis label

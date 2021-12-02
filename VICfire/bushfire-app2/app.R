@@ -5,6 +5,7 @@ library(leaflet)
 library(plotly)
 library(raster)
 library(tmap)
+library(shinyalert)
 library(shinycssloaders)
 library(shinyWidgets)
 
@@ -54,6 +55,9 @@ ignition_rasterize_cluster_sf_month <- cbind(ignition_rasterize_cluster_sf_month
 # **************************************** define UI ****************************************
 ui <- fluidPage(
 
+    # --- use `shinyalert`; for information modal
+    shinyalert::useShinyalert(),
+
     # --- set background colour
     shinyWidgets::setBackgroundColor(color = "#FFF5EE"),
 
@@ -92,10 +96,21 @@ ui <- fluidPage(
                                                                                     lib = "glyphicon")),
                                                          direction = "horizontal",
                                                          size = "lg"),
+                      br(),
+
+                      # --- information button
+                      shinyWidgets::actionBttn(inputId = "info_bttn2",
+                                               label = "",
+                                               style = "material-circle",
+                                               color = "danger",
+                                               icon = icon("info")),
+
                       br(), br(), br(),
                       # --- download button
                       downloadBttn(outputId = "full_data_download",
-                                   label = "download full data as csv")
+                                   label = "download full data as csv"),
+
+
         ),
 
         # === main column for leaflet map output
@@ -177,6 +192,16 @@ ui <- fluidPage(
 
 # **************************************** define server ****************************************
 server <- function(input, output) {
+
+    shiny::observeEvent(input$info_bttn2, {
+        # show a modal; when button pressed
+        shinyalert::shinyalert(title = "The bushfire risk historical information map shows the historical fire ignitions and weather/climate variables from 2016-2021. These are used in predicting bushfire risk.",
+                               size = "m", # size of modal
+                               showConfirmButton = T, # no confirm button
+                               closeOnEsc = T,
+                               closeOnClickOutside = T,
+                               type = "info") # info logo
+    })
 
     # ==================== create leaflet map ====================
 
@@ -327,8 +352,9 @@ server <- function(input, output) {
                         layerId = ~id,
                         fillOpacity = 0.4,
                         color = ~pal(fire_count), # fill by `fire_count`; using above palette
-                        popup = ~paste0("<b> id: ", id, "</b>", "<br/>",
-                                        "number of ignitions: ", fire_count)) %>% # click pop-up texts
+                        # click pop-up texts
+                        popup = ~paste0("<h3 style='font-size:5; color:#1E90FF'><b> id: ", id, "</b></h3>", "<br/>",
+                                        "<h4 style='font-size:5'><b>number of historical ignitions </b>", "= ", fire_count, "</h3>", "<br/>")) %>%
 
             # --- add circle markers; each `bf_season` as a layer
             # 2016-2017
