@@ -15,7 +15,8 @@ library(shinyWidgets)
 # load(here::here("data/eda.RData"))
 
 model_df3 <- readr::read_rds("model_df3.rds")
-ignition_rasterize_cluster_sf_month <- readr::read_rds("ignition_rasterize_cluster_sf_month.rds")
+ignition_rasterize_cluster_sf_month <- readr::read_rds("ignition_rasterize_cluster_sf_month.rds") %>%
+    arrange(year, month) # arrange by year, month; to run loop to compute `bf_season`
 cluster_16_21_sf <- readr::read_rds("cluster_16_21_sf.rds")
 
 
@@ -103,7 +104,7 @@ ui <- fluidPage(
                                              height = 1000) %>%
                           shinycssloaders::withSpinner(),
 
-                      shiny::h2("click grid cell to view historical information for that cell"),
+                      shiny::h2(shiny::textOutput(outputId = "cell_id_text3")),
 
                       br(), br(), br(),
 
@@ -116,23 +117,59 @@ ui <- fluidPage(
         shiny::column(width = 2,
                       style = "max-height: 85vh; overflow-y: auto;", # add vertical scroll bar
 
-                      shiny::h2(paste0("Historical values across variables for cell")),
+                      shiny::h2(shiny::textOutput(outputId = "cell_id_text2")),
 
-                      # --- `fire_count` vs. `bf_season`
+                      # `fire_count` vs. `bf_season`
                       plotly::plotlyOutput("fire_bf_season_plotly") %>%
                           shinycssloaders::withSpinner(),
 
                       br(),
 
-                      # --- `fire_count` vs. `month`
+                      # `fire_count` vs. `month`
                       plotly::plotlyOutput("fire_month_plotly") %>%
                           shinycssloaders::withSpinner(),
 
                       br(),
 
-                      # --- `max_temp` vs. `month`
+                      # `daily_rain`
+                      plotly::plotlyOutput("daily_rain_plotly") %>%
+                          shinycssloaders::withSpinner(),
+
+                      br(),
+
+                      # `max_temp`
                       plotly::plotlyOutput("max_temp_plotly") %>%
-                          shinycssloaders::withSpinner()
+                          shinycssloaders::withSpinner(),
+
+                      br(),
+
+                      # `et_short_crop`
+                      plotly::plotlyOutput("et_short_crop_plotly") %>%
+                          shinycssloaders::withSpinner(),
+
+                      br(),
+
+                      # `radiation`
+                      plotly::plotlyOutput("radiation_plotly") %>%
+                          shinycssloaders::withSpinner(),
+
+                      br(),
+
+                      # `rh`
+                      plotly::plotlyOutput("rh_plotly") %>%
+                          shinycssloaders::withSpinner(),
+
+                      br(),
+
+                      # `si10`
+                      plotly::plotlyOutput("si10_plotly") %>%
+                          shinycssloaders::withSpinner(),
+
+                      br(),
+
+                      plotly::plotlyOutput("s0_pct_plotly") %>%
+                          shinycssloaders::withSpinner(),
+
 
         )
     )
@@ -351,6 +388,35 @@ server <- function(input, output) {
             filter(id == input$map_shape_click$id)
     })
 
+
+    output$cell_id_text2 <- shiny::renderText({
+
+        click <- input$map_shape_click
+
+        # if user hasn't clicked
+        if(is.null(click)){
+            paste("click on grid cell to show plots")
+        }
+        # if (user clicked on grid cell); print
+        else{
+            paste("Historical values across variable values for cell", input$map_shape_click$id)
+        }
+    })
+
+    output$cell_id_text3 <- shiny::renderText({
+
+        click <- input$map_shape_click
+
+        # if user hasn't clicked
+        if(is.null(click)){
+            paste("click on grid cell to show table")
+        }
+        # if (user clicked on grid cell); print
+        else{
+            ""
+        }
+    })
+
     # --- DT::datatable; based on cell clicked
     output$datatable_hist <- DT::renderDT(
         model_df_id() %>%
@@ -358,7 +424,9 @@ server <- function(input, output) {
                                          pageLength = 5, #
                                          dom = "Bfrtip", # dom options
                                          buttons = c("csv", "excel")), # include `csv` & `excel` buttons; allow user; download data
-                          extensions = "Buttons") %>% # add buttons
+                          extensions = "Buttons", # add buttons
+                          caption = htmltools::tags$caption(tags$h3(style = 'caption-side: top; text-align: left;',
+                                                                    paste("cell", input$map_shape_click$id, "Historical Information (Tabular)")))) %>%
             DT::formatRound(columns = 6:33,
                             digits = 3)
     )
@@ -385,7 +453,9 @@ server <- function(input, output) {
                             y = ~fire_count,
                             type = "bar",
                             text = ~fire_count,
-                            textposition = "auto") %>%
+                            textposition = "auto",
+                            hovertemplate = paste("bushfire season: %{x}",
+                                                  "<br>fire ignitions: %{y}")) %>%
             plotly::layout(
                 # plot title
                 title = "number of fires ignitions in bushfire season",
@@ -407,7 +477,7 @@ server <- function(input, output) {
         model_df_id() %>%
             group_by(bf_season,
                      month) %>%
-            summarise(fire_count = sum(fire_count)) %>%
+            summarise(fire_count = sum(fire_count, na.rm = T)) %>%
             # wide form (each `month` have own column)
             pivot_wider(names_from = month,
                         values_from = fire_count) %>%
@@ -418,32 +488,50 @@ server <- function(input, output) {
                       y = ~`10`,
                       name = "Oct",
                       text = ~`10`,
-                      textposition = "outside") %>%
+                      textposition = "outside",
+                      hovertemplate = paste("bushfire season: %{x}",
+                                            "<br>month: Oct",
+                                            "<br>fire ignitions: %{y}")) %>%
             add_trace(x = ~bf_season,
                       y = ~`11`,
                       name = "Nov",
                       text = ~`11`,
-                      textposition = "outside") %>%
+                      textposition = "outside",
+                      hovertemplate = paste("bushfire season: %{x}",
+                                            "<br>month: Nov",
+                                            "<br>fire ignitions: %{y}")) %>%
             add_trace(x = ~bf_season,
                       y = ~`12`,
                       name = "Dec",
                       text = ~`12`,
-                      textposition = "outside") %>%
+                      textposition = "outside",
+                      hovertemplate = paste("bushfire season: %{x}",
+                                            "<br>month: Dec",
+                                            "<br>fire ignitions: %{y}")) %>%
             add_trace(x = ~bf_season,
                       y = ~`1`,
                       name = "Jan",
                       text = ~`1`,
-                      textposition = "outside") %>%
+                      textposition = "outside",
+                      hovertemplate = paste("bushfire season: %{x}",
+                                            "<br>month: Jan",
+                                            "<br>fire ignitions: %{y}")) %>%
             add_trace(x = ~bf_season,
                       y = ~`2`,
                       name = "Feb",
                       text = ~`2`,
-                      textposition = "outside") %>%
+                      textposition = "outside",
+                      hovertemplate = paste("bushfire season: %{x}",
+                                            "<br>month: Feb",
+                                            "<br>fire ignitions: %{y}")) %>%
             add_trace(x = ~bf_season,
                       y = ~`3`,
                       name = "Mar",
                       text = ~`3`,
-                      textposition = "outside") %>%
+                      textposition = "outside",
+                      hovertemplate = paste("bushfire season: %{x}",
+                                            "<br>month: Mar",
+                                            "<br> fire ignitions: %{y}")) %>%
             plotly::layout(barmode = "group",
                            title = "fire ignitions against months in bushfire season",
                            yaxis = list(title = "number of ignitions",
@@ -455,7 +543,31 @@ server <- function(input, output) {
                            bargroupgap = 0.25)
     })
 
-    # --- plot
+    # --- plot variable values
+    # `daily_rain`
+    output$daily_rain_plotly <- plotly::renderPlotly({
+        model_df_id() %>%
+            # extract date
+            mutate(date = paste(year, month, sep = "") %>% lubridate::ym(),
+                   .after = "month") %>%
+            plot_ly(x = ~date,
+                    y = ~daily_rain,
+                    split = ~bf_season,
+                    type = "scatter",
+                    mode = "lines+markers",
+                    hovertemplate = paste("bushfire season = %{x|%b}", # show month
+                                          "<br>daily rain(mm): %{y:.2f}")) %>% # value in 2d.p.
+            plotly::layout(title = "daily rain over bushfire seasons", # title
+                           # set tick labels
+                           xaxis = list(tickformat = "%Y",
+                                        ticklabelmode = "period",
+                                        dtick = "M12"), # every 12 months
+                           # legend
+                           legend = list(title = list(text = "bushfire_season"))
+            )
+    })
+
+    # `max_temp`
     output$max_temp_plotly <- plotly::renderPlotly({
         model_df_id() %>%
             # extract date
@@ -465,10 +577,148 @@ server <- function(input, output) {
                     y = ~max_temp,
                     split = ~bf_season,
                     type = "scatter",
-                    mode = "lines+markers") %>%
-            plotly::layout(title = "max temperature over bushfire season", # title
+                    mode = "lines+markers",
+                    hovertemplate = paste("bushfire season = %{x|%b}", # show month
+                                          "<br>max temperature(°C): %{y:.2f}")) %>% # value in 2d.p.
+            plotly::layout(title = "max temperature over bushfire seasons", # title
                            # set tick labels
-                           xaxis = list(tickformat = "%b\n%Y",
+                           xaxis = list(tickformat = "%Y",
+                                        ticklabelmode = "period",
+                                        dtick = "M12"), # every 12 months
+                           # legend
+                           legend = list(title = list(text = "bushfire_season"))
+            )
+    })
+
+    # `et_short_crop`
+    output$et_short_crop_plotly <- plotly::renderPlotly({
+        model_df_id() %>%
+            # extract date
+            mutate(date = paste(year, month, sep = "") %>% lubridate::ym(),
+                   .after = "month") %>%
+            plot_ly(x = ~date,
+                    y = ~et_short_crop,
+                    split = ~bf_season,
+                    type = "scatter",
+                    mode = "lines+markers",
+                    hovertemplate = paste("bushfire season = %{x|%b}", # show month
+                                          "<br>evapotranspiration rate(mm): %{y:.2f}")) %>% # value in 2d.p.
+            plotly::layout(title = "evapotranspiration over bushfire seasons", # title
+                           # set tick labels
+                           xaxis = list(tickformat = "%Y",
+                                        ticklabelmode = "period",
+                                        dtick = "M12"), # every 12 months
+                           # legend
+                           legend = list(title = list(text = "bushfire_season"))
+            )
+    })
+
+    # radiation
+    output$radiation_plotly <- plotly::renderPlotly({
+        model_df_id() %>%
+            # extract date
+            mutate(date = paste(year, month, sep = "") %>% lubridate::ym(),
+                   .after = "month") %>%
+            plot_ly(x = ~date,
+                    y = ~radiation,
+                    split = ~bf_season,
+                    type = "scatter",
+                    mode = "lines+markers",
+                    hovertemplate = paste("bushfire season = %{x|%b}", # show month
+                                          "<br>radiation(MJ/m^2): %{y:.2f}")) %>% # value in 2d.p.
+            plotly::layout(title = "radiation over bushfire seasons", # title
+                           # set tick labels
+                           xaxis = list(tickformat = "%Y",
+                                        ticklabelmode = "period",
+                                        dtick = "M12"), # every 12 months
+                           # legend
+                           legend = list(title = list(text = "bushfire_season"))
+            )
+    })
+
+    # radiation
+    output$rh_plotly <- plotly::renderPlotly({
+        model_df_id() %>%
+            # extract date
+            mutate(date = paste(year, month, sep = "") %>% lubridate::ym(),
+                   .after = "month") %>%
+            plot_ly(x = ~date,
+                    y = ~rh,
+                    split = ~bf_season,
+                    type = "scatter",
+                    mode = "lines+markers",
+                    hovertemplate = paste("bushfire season = %{x|%b}", # show month
+                                          "<br>relative humidity: %{y:.2f}")) %>% # value in 2d.p.
+            plotly::layout(title = "relative humidity over bushfire seasons", # title
+                           # set tick labels
+                           xaxis = list(tickformat = "%Y",
+                                        ticklabelmode = "period",
+                                        dtick = "M12"), # every 12 months
+                           # legend
+                           legend = list(title = list(text = "bushfire_season"))
+            )
+    })
+
+    output$rh_plotly <- plotly::renderPlotly({
+        model_df_id() %>%
+            # extract date
+            mutate(date = paste(year, month, sep = "") %>% lubridate::ym(),
+                   .after = "month") %>%
+            plot_ly(x = ~date,
+                    y = ~rh,
+                    split = ~bf_season,
+                    type = "scatter",
+                    mode = "lines+markers",
+                    hovertemplate = paste("bushfire season = %{x|%b}", # show month
+                                          "<br>relative humidity(%): %{y:.2f}")) %>% # value in 2d.p.
+            plotly::layout(title = "relative humidity over bushfire seasons", # title
+                           # set tick labels
+                           xaxis = list(tickformat = "%Y",
+                                        ticklabelmode = "period",
+                                        dtick = "M12"), # every 12 months
+                           # legend
+                           legend = list(title = list(text = "bushfire_season"))
+            )
+    })
+
+
+    output$si10_plotly <- plotly::renderPlotly({
+        model_df_id() %>%
+            # extract date
+            mutate(date = paste(year, month, sep = "") %>% lubridate::ym(),
+                   .after = "month") %>%
+            plot_ly(x = ~date,
+                    y = ~si10,
+                    split = ~bf_season,
+                    type = "scatter",
+                    mode = "lines+markers",
+                    hovertemplate = paste("bushfire season = %{x|%b}", # show month
+                                          "<br>10m wind speed(m/s): %{y:.2f}")) %>% # value in 2d.p.
+            plotly::layout(title = "10m wind speed over bushfire seasons", # title
+                           # set tick labels
+                           xaxis = list(tickformat = "%Y",
+                                        ticklabelmode = "period",
+                                        dtick = "M12"), # every 12 months
+                           # legend
+                           legend = list(title = list(text = "bushfire_season"))
+            )
+    })
+
+    output$s0_pct_plotly <- plotly::renderPlotly({
+        model_df_id() %>%
+            # extract date
+            mutate(date = paste(year, month, sep = "") %>% lubridate::ym(),
+                   .after = "month") %>%
+            plot_ly(x = ~date,
+                    y = ~s0_pct,
+                    split = ~bf_season,
+                    type = "scatter",
+                    mode = "lines+markers",
+                    hovertemplate = paste("bushfire season = %{x|%b}", # show month
+                                          "<br>surface soil moisture(%): %{y:.2f}")) %>% # value in 2d.p.
+            plotly::layout(title = "upper surface soil moisture over bushfire seasons", # title
+                           # set tick labels
+                           xaxis = list(tickformat = "%Y",
                                         ticklabelmode = "period",
                                         dtick = "M12"), # every 12 months
                            # legend
