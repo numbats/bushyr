@@ -283,26 +283,27 @@ server <- function(input, output, session) {
                   values_from = value) %>%
       ungroup() %>%
 
-      # ***changing variable values do NOT change lag variable values; comment away here***
-      # # compute 1st lag
-      # mutate(across(.cols = daily_rain:s0_pct,
-      #               .fns = ~lag(.x),
-      #               .names = "{.col}_1")) %>%
-      # # compute 2nd lag
-      # mutate(across(.cols = daily_rain:s0_pct,
-      #               .fns = ~lag(.x,
-      #                           n = 2),
-      #               .names = "{.col}_2")) %>%
-      # # join with full data set (with untempered variables)
-      # na.omit() %>%
-      # left_join(., model_df2 %>% na.omit() %>% dplyr::select(id, year, month, # keys
-      #                                                        forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
-      #           by = c("id", "year", "month")) %>%
-    # *** replace by this ***
-    left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
-                                                    x, y, fire_count, lai_lv, lai_hv, forest:last_col()), # variables to join
-              by = c("id", "year", "month"))  %>%
-      # *** end ***
+      # *** 1. changing variable values do NOT change lag variable values; comment away here 1. ***
+      # compute 1st lag
+      mutate(across(.cols = daily_rain:s0_pct,
+                    .fns = ~lag(.x),
+                    .names = "{.col}_1")) %>%
+      # compute 2nd lag
+      mutate(across(.cols = daily_rain:s0_pct,
+                    .fns = ~lag(.x,
+                                n = 2),
+                    .names = "{.col}_2")) %>%
+      # join with full data set (with untempered variables)
+      na.omit() %>%
+      left_join(., model_df2 %>% na.omit() %>% dplyr::select(id, year, month, # keys
+                                                             forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+                by = c("id", "year", "month")) %>%
+      # *** 1. end 1. ***
+    # # ***2. replace by this 2. ***
+    # left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+    #                                                 x, y, fire_count, lai_lv, lai_hv, forest:last_col()), # variables to join
+    #           by = c("id", "year", "month"))  %>%
+    #   # *** 2. end 2. ***
 
       relocate(fire_count, x, y,
                .after = "year") %>%
@@ -548,7 +549,7 @@ server <- function(input, output, session) {
                              style = "pretty")
   })
 
-  # --- create avg. values; based on user click map *shown in pop-up
+  # --- create avg. values; based on user click map *shown in pop-up (lag!)// show in plotlys
   avg_popup_vaues_df <- shiny::reactive({
 
     click <- input$map_shape_click
@@ -568,6 +569,7 @@ server <- function(input, output, session) {
 
   })
 
+  # initialise reactive avg. variable values
   avg_popup_values <- reactiveValues(
     daily_rain_avg = 0,
     max_temp_avg = 0,
@@ -577,6 +579,7 @@ server <- function(input, output, session) {
     si10_avg = 0,
     s0_pct_avg = 0)
 
+  # make them reactive
   shiny::observe({
     avg_popup_values$daily_rain_avg <- avg_popup_vaues_df()$daily_rain
     avg_popup_values$max_temp_avg <- avg_popup_vaues_df()$max_temp
@@ -784,7 +787,7 @@ server <- function(input, output, session) {
               showlegend = FALSE,
               name = 'High') %>%
       add_trace(x = ~year,
-                y = ~daily_rain_low,
+                y = ~pmax(daily_rain_low, 0), # cannot go below 0
                 type = 'scatter',
                 mode = 'lines',
                 fill = 'tonexty',
@@ -931,7 +934,7 @@ server <- function(input, output, session) {
               showlegend = FALSE,
               name = 'High') %>%
       add_trace(x = ~year,
-                y = ~radiation_low,
+                y = ~pmax(radiation_low),
                 type = 'scatter',
                 mode = 'lines',
                 fill = 'tonexty',
@@ -977,7 +980,7 @@ server <- function(input, output, session) {
               showlegend = FALSE,
               name = 'High') %>%
       add_trace(x = ~year,
-                y = ~rh_low,
+                y = ~pmax(rh_low, 0),
                 type = 'scatter',
                 mode = 'lines',
                 fill = 'tonexty',
@@ -1033,7 +1036,7 @@ server <- function(input, output, session) {
                 name = 'Low') %>%
       # add average line + markers
       add_trace(x = ~year,
-                y = ~si10_avg,
+                y = ~pmax(si10_avg, 0),
                 type = 'scatter',
                 mode = 'lines+markers',
                 line = list(color='rgb(0,100,80)'),
@@ -1069,7 +1072,7 @@ server <- function(input, output, session) {
               showlegend = FALSE,
               name = 'High') %>%
       add_trace(x = ~year,
-                y = ~s0_pct_low,
+                y = ~pmax(s0_pct_low, 0),
                 type = 'scatter',
                 mode = 'lines',
                 fill = 'tonexty',
