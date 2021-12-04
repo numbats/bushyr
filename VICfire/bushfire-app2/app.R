@@ -15,6 +15,8 @@ library(shinyWidgets)
 # load(here::here("data/ida.RData"))
 # load(here::here("data/eda.RData"))
 
+select <- dplyr::select
+
 model_df3 <- readr::read_rds("model_df3.rds")
 ignition_rasterize_cluster_sf_month <- readr::read_rds("ignition_rasterize_cluster_sf_month.rds") %>%
     arrange(year, month) # arrange by year, month; to run loop to compute `bf_season`
@@ -62,7 +64,7 @@ ui <- fluidPage(
     shinyWidgets::setBackgroundColor(color = "#FFF5EE"),
 
     # add app title
-    tags$h1("Bushfire Risk Information",
+    tags$h1("Bushfire Risk Historical Information",
             style = "font-family: Impact; color: #1e90ff; font-size: 60px",
             align = "center"),
     br(),
@@ -425,7 +427,7 @@ server <- function(input, output) {
         }
         # if (user clicked on grid cell); print
         else{
-            paste("Historical values across variable values for cell", input$map_shape_click$id)
+            paste("Observed values across variable values for cell", input$map_shape_click$id)
         }
     })
 
