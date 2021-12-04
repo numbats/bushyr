@@ -69,54 +69,106 @@ ui <- fluidPage(
                   # --- user; toggle variable values
 
                   # `daily_rain`
-                  shinyWidgets::sliderTextInput(inputId = "daily_rain_slider",
-                                                label = tags$h4("Daily rain"),
-                                                choices = -100:100,
-                                                selected = 0,
-                                                post = "%"),
+                  splitLayout(cellWidths = c("60%", "20%", "20%"),
+                              # slider input
+                              shinyWidgets::sliderTextInput(inputId = "daily_rain_slider",
+                                                            label = tags$h4("Daily rain"),
+                                                            choices = -100:100,
+                                                            selected = 0,
+                                                            post = "%"),
+
+                              # mean valuebox
+                              shinydashboard::valueBoxOutput("daily_rain_avg_value_box"),
+
+                              # sd valuebox
+                              shinydashboard::valueBoxOutput("daily_rain_sd_value_box")
+                  ),
+
 
                   # `max_temp`
-                  shinyWidgets::sliderTextInput(inputId = "max_temp_slider",
-                                                label = tags$h4("Max temperature"),
-                                                choices = -100:100,
-                                                selected = 0,
-                                                post = "%"),
-
+                  splitLayout(cellWidths = c("60%", "20%", "20%"),
+                              # slider Input
+                              shinyWidgets::sliderTextInput(inputId = "max_temp_slider",
+                                                            label = tags$h4("Max temperature"),
+                                                            choices = -100:100,
+                                                            selected = 0,
+                                                            post = "%"),
+                              # mean valuebox
+                              shinydashboard::valueBoxOutput("max_temp_avg_value_box"),
+                              # sd valuebox
+                              shinydashboard::valueBoxOutput("max_temp_sd_value_box")
+                  ),
 
                   # `et_short_crop`
-                  shinyWidgets::sliderTextInput(inputId = "et_short_crop_slider",
-                                                label = tags$h4("Evapotranspiration rate"),
-                                                choices = -100:100,
-                                                selected = 0,
-                                                post = "%"),
+                  splitLayout(cellWidths = c("60%", "20%", "20%"),
+                              # slider Input
+                              shinyWidgets::sliderTextInput(inputId = "et_short_crop_slider",
+                                                            label = tags$h4("Evapotranspiration rate"),
+                                                            choices = -100:100,
+                                                            selected = 0,
+                                                            post = "%"),
+                              # mean valuebox
+                              shinydashboard::valueBoxOutput("et_short_crop_avg_value_box"),
+                              # sd valuebox
+                              shinydashboard::valueBoxOutput("et_short_crop_sd_value_box")
+                  ),
 
                   # `radiation`
-                  shinyWidgets::sliderTextInput(inputId = "radiation_slider",
-                                                label = tags$h4("Radiation"),
-                                                choices = -100:100,
-                                                selected = 0,
-                                                post = "%"),
+                  splitLayout(cellWidths = c("60%", "20%", "20%"),
+                              # slider Input
+                              shinyWidgets::sliderTextInput(inputId = "radiation_slider",
+                                                            label = tags$h4("Radiation"),
+                                                            choices = -100:100,
+                                                            selected = 0,
+                                                            post = "%"),
+                              # mean valuebox
+                              shinydashboard::valueBoxOutput("radiation_avg_value_box"),
+                              # sd valuebox
+                              shinydashboard::valueBoxOutput("radiation_sd_value_box")
+                  ),
 
                   # `rh`
-                  shinyWidgets::sliderTextInput(inputId = "rh_slider",
-                                                label = tags$h4("Relative humidity"),
-                                                choices = -100:100,
-                                                selected = 0,
-                                                post = "%"),
+                  splitLayout(cellWidths = c("60%", "20%", "20%"),
+                              # slider Input
+                              shinyWidgets::sliderTextInput(inputId = "rh_slider",
+                                                            label = tags$h4("Relative humidity"),
+                                                            choices = -100:100,
+                                                            selected = 0,
+                                                            post = "%"),
+                              # mean valuebox
+                              shinydashboard::valueBoxOutput("rh_avg_value_box"),
+                              # sd valuebox
+                              shinydashboard::valueBoxOutput("rh_sd_value_box")
+                  ),
 
                   # `si10`
-                  shinyWidgets::sliderTextInput(inputId = "si10_slider",
-                                                label = tags$h4("10m wind speed"),
-                                                choices = -100:100,
-                                                selected = 0,
-                                                post = "%"),
+                  splitLayout(cellWidths = c("60%", "20%", "20%"),
+                              # slider Input
+                              shinyWidgets::sliderTextInput(inputId = "si10_slider",
+                                                            label = tags$h4("10m wind speed"),
+                                                            choices = -100:100,
+                                                            selected = 0,
+                                                            post = "%"),
+                              # mean valuebox
+                              shinydashboard::valueBoxOutput("si10_avg_value_box"),
+                              # sd valuebox
+                              shinydashboard::valueBoxOutput("si10_sd_value_box")
+                  ),
 
                   # `s0_pct`
-                  shinyWidgets::sliderTextInput(inputId = "s0_pct_slider",
-                                                label = tags$h4("Surface soil moisture"),
-                                                choices = -100:100,
-                                                selected = 0,
-                                                post = "%"),
+                  splitLayout(cellWidths = c("60%", "20%", "20%"),
+                              # slider Input
+                              shinyWidgets::sliderTextInput(inputId = "s0_pct_slider",
+                                                            label = tags$h4("Surface soil moisture"),
+                                                            choices = -100:100,
+                                                            selected = 0,
+                                                            post = "%"),
+                              # mean valuebox
+                              shinydashboard::valueBoxOutput("s0_pct_avg_value_box"),
+                              # sd valuebox
+                              shinydashboard::valueBoxOutput("s0_pct_sd_value_box")
+                  ),
+
 
                   # --- apply button
                   shinyWidgets::actionBttn(inputId = "apply_bttn",
@@ -299,11 +351,11 @@ server <- function(input, output, session) {
                                                              forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
                 by = c("id", "year", "month")) %>%
       # *** 1. end 1. ***
-    # # ***2. replace by this 2. ***
-    # left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
-    #                                                 x, y, fire_count, lai_lv, lai_hv, forest:last_col()), # variables to join
-    #           by = c("id", "year", "month"))  %>%
-    #   # *** 2. end 2. ***
+      # # ***2. replace by this 2. ***
+      # left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+      #                                                 x, y, fire_count, lai_lv, lai_hv, forest:last_col()), # variables to join
+      #           by = c("id", "year", "month"))  %>%
+      #   # *** 2. end 2. ***
 
       relocate(fire_count, x, y,
                .after = "year") %>%
@@ -564,7 +616,9 @@ server <- function(input, output, session) {
       model_df_user2() %>%
         filter(id == input$map_shape_click$id) %>%
         summarise(across(.cols = daily_rain:s0_pct,
-                         .fns = mean))
+                         .fns = list(mean = mean,
+                                     sd = sd),
+                         .names = "{.col}_{.fn}"))
     }
 
   })
@@ -577,17 +631,34 @@ server <- function(input, output, session) {
     radiation_avg = 0,
     rh_avg = 0,
     si10_avg = 0,
-    s0_pct_avg = 0)
+    s0_pct_avg = 0,
+
+    daily_rain_sd = 0,
+    max_temp_sd = 0,
+    et_short_crop_sd = 0,
+    radiation_sd = 0,
+    rh_sd = 0,
+    si10_sd = 0,
+    s0_pct_sd = 0
+    )
 
   # make them reactive
   shiny::observe({
-    avg_popup_values$daily_rain_avg <- avg_popup_vaues_df()$daily_rain
-    avg_popup_values$max_temp_avg <- avg_popup_vaues_df()$max_temp
-    avg_popup_values$et_short_crop_avg <- avg_popup_vaues_df()$et_short_crop
-    avg_popup_values$radiation_avg <- avg_popup_vaues_df()$radiation
-    avg_popup_values$rh_avg <- avg_popup_vaues_df()$rh
-    avg_popup_values$si10_avg <- avg_popup_vaues_df()$si10
-    avg_popup_values$s0_pct_avg <- avg_popup_vaues_df()$s0_pct
+    avg_popup_values$daily_rain_avg <- avg_popup_vaues_df()$daily_rain_mean
+    avg_popup_values$max_temp_avg <- avg_popup_vaues_df()$max_temp_mean
+    avg_popup_values$et_short_crop_avg <- avg_popup_vaues_df()$et_short_crop_mean
+    avg_popup_values$radiation_avg <- avg_popup_vaues_df()$radiation_mean
+    avg_popup_values$rh_avg <- avg_popup_vaues_df()$rh_mean
+    avg_popup_values$si10_avg <- avg_popup_vaues_df()$si10_mean
+    avg_popup_values$s0_pct_avg <- avg_popup_vaues_df()$s0_pct_mean
+
+    avg_popup_values$daily_rain_sd <- avg_popup_vaues_df()$daily_rain_sd
+    avg_popup_values$max_temp_sd <- avg_popup_vaues_df()$max_temp_sd
+    avg_popup_values$et_short_crop_sd <- avg_popup_vaues_df()$et_short_crop_sd
+    avg_popup_values$radiation_sd <- avg_popup_vaues_df()$radiation_sd
+    avg_popup_values$rh_sd <- avg_popup_vaues_df()$rh_sd
+    avg_popup_values$si10_sd <- avg_popup_vaues_df()$si10_sd
+    avg_popup_values$s0_pct_sd <- avg_popup_vaues_df()$s0_pct_sd
   })
 
 
@@ -1100,7 +1171,210 @@ server <- function(input, output, session) {
              shapes = list(hline(avg_popup_values$s0_pct_avg))) # dash horizontal line @ avg. value
   })
 
+  # --- Value Boxes for mean & sd; beside sliderInputs
 
+  # `daily_rain`
+  output$daily_rain_avg_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else; show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$daily_rain_avg, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  output$daily_rain_sd_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show sd value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$daily_rain_sd, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  # `max_temp`
+  output$max_temp_avg_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$max_temp_avg, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  output$max_temp_sd_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show sd value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$max_temp_sd, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  # `et_short_crop`
+  output$et_short_crop_avg_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$et_short_crop_avg, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  output$et_short_crop_sd_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$et_short_crop_sd, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  # `radiation`
+  output$radiation_avg_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$radiation_avg, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  output$radiation_sd_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$radiation_sd, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  # `radiation`
+  output$rh_avg_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$rh_avg, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  output$rh_sd_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$rh_sd, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  # `si10`
+  output$si10_avg_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$si10_avg, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  output$si10_sd_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$si10_sd, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  # `s0_pct`
+  output$s0_pct_avg_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$s0_pct_avg, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("mean", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
+
+  output$s0_pct_sd_value_box <- shinydashboard::renderValueBox({
+    # if no clicks; show X value
+    if(is.null(input$map_shape_click)){
+      shinydashboard::valueBox(value = tags$p("X", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+    # else show mean value
+    else{
+      shinydashboard::valueBox(value = tags$p(round(avg_popup_values$s0_pct_sd, 2), style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"),
+                               subtitle = tags$p("sd", style = "text-align:center; color: #e52b50; background-color: #FFF5EE;"))
+    }
+
+  })
 
 
 }
