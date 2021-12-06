@@ -192,7 +192,12 @@ ui <- fluidPage(
                                            label = "",
                                            style = "material-circle",
                                            color = "danger",
-                                           icon = icon("info"))
+                                           icon = icon("info")),
+                  
+                  br(), br(), br(),
+                  
+                  shiny::actionButton(inputId='github', label="github", 
+                                      onclick ="window.open('https://github.com/numbats/bushyr/tree/fire-risk-app')")
 
 
     ),
