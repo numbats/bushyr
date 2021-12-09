@@ -1,0 +1,1550 @@
+---
+title: "final_model"
+author: "Helen Evangelina"
+date: "11/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(xaringanthemer)
+library(kableExtra)
+library(patchwork)
+library(tmap)
+library(knitr)
+library(kableExtra)
+library(tidymodels)
+library(GGally)
+library(ranger)
+library(lime)
+library(raster)
+library(gridExtra)
+library(tmap)
+library(lubridate)
+library(plotly)
+```
+
+```{r}
+# --- load relevant variables 
+load(here::here("VICfire/data/eda_report.Rdata"))
+load(here::here("VICfire/data/ida_report.Rdata"))
+load(here::here("VICfire/data/report_data.Rdata"))
+```
+
+```{r}
+data <- read.csv(here::here("VICfire/data/model_df2.csv"))
+```
+
+
+```{r}
+# creating a raster for victoria
+vic_raster <- raster(
+  # no. of rows & columns (directly linked to resolution of grid cell)
+  nrows = 20,
+  ncols = 20,
+  
+  # bbox (bounding box of Victoria)
+  xmn = 140.9617,
+  xmx = 149.9763,
+  ymn = -39.13396,
+  ymx = -33.99605,
+  
+  # crs
+  crs = "+proj=longlat +datum=WGS84"
+  )
+vic_raster[] <- 1:ncell(vic_raster)
+
+# creating the lon & lat for each cell id
+lonlat <- as.data.frame(coordinates(vic_raster)) %>%
+  mutate(id = as.factor(1:400))
+```
+
+## correlation between variables
+```{r}
+data2 <- train %>%
+  ungroup() %>%
+  dplyr::select(-id, -year) 
+ggcorr(data2, label = T)
+```
+ a lot of variables are highly correlated.
+ [multicollinearity problem]
+
+## modeling
+### simple linear model
+```{r}
+# using count as the response
+lm <- lm(fire_count ~ .-id - year, data = train)
+summary(lm)
+```
+
+```{r}
+# using log scale of count as the response
+lm_log <- lm(log(fire_count+1) ~ .-id - year, data = train)
+summary(lm_log)
+```
+
+### checking if the variables are linear
+```{r}
+train %>%
+  ggplot(aes(y = fire_count,
+             x = daily_rain)) +
+  geom_jitter() +
+  geom_smooth()
+```
+```{r}
+train %>%
+  ggplot(aes(y = fire_count,
+             x = rh)) +
+  geom_jitter() +
+  geom_smooth()
+```
+
+```{r}
+train %>%
+  ggplot(aes(y = fire_count,
+             x = max_temp)) +
+  geom_jitter() +
+  geom_smooth()
+```
+
+```{r}
+train %>%
+  ggplot(aes(y = fire_count,
+             x = radiation)) +
+  geom_jitter() +
+  geom_smooth()
+```
+```{r}
+train %>%
+  ggplot(aes(y = fire_count,
+             x = lai_hv)) +
+  geom_jitter() +
+  geom_smooth()
+```
+
+### glm 
+```{r}
+glm <- glm(fire_count ~ . -id -year, data = train, family = poisson())
+summary(glm)
+```
+- comparing with normal lm model:
+```{r}
+lm2 <- glm(fire_count ~ . -id -year, data = train, family = "gaussian")
+summary(lm2)
+```
+
+both models have high deviance which indicates that the two models are not really a good model. But lm has way higher deviance, which means glm is better?
+
+
+- plotting the model:
+```{r}
+library(broom)
+augment_lm <- augment(lm2)
+ggplot(lm2, aes(x = .fitted,
+             y = .resid)) + 
+  geom_point() +
+  geom_smooth()
+
+augment_glm <- augment(glm)
+ggplot(augment_glm, aes(x = .fitted,
+             y = .resid)) + 
+  geom_point() +
+  geom_smooth()
+```
+
+### Lasso regression
+```{r lasso-metric, fig.cap="mean RMSE(top) and R^2 (bottom) against penalty term"}
+lasso_grid %>% 
+  # obtain tuning results; across performance metrics (`.estimator`)
+  tune::collect_metrics() %>% 
+  # plot
+  ggplot(aes(x = penalty,
+             y = mean,
+             colour = .metric)) +
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err)) +
+  geom_line(size = 1.5) +
+  # facet by `.metric`
+  facet_wrap(~ .metric,
+             scales = "free",
+             nrow = 2) +
+  # penalty in log10 scale
+  scale_x_log10() +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+```{r vi, fig.cap="variable importance plot from lasso regression"}
+# --- plot variable importance
+final_lasso %>% 
+  parsnip::fit(train) %>% 
+  # extract model fit
+  workflows::extract_fit_parsnip() %>% 
+  # compute variable importance scores for predictors
+  vip::vi(lambda = lowest_rmse$penalty) %>% 
+  # absolute `Importance`; for plotting
+  mutate(Importance = abs(Importance)) %>% 
+  # plot 
+  ggplot(aes(x = Importance,
+             y = fct_reorder(Variable,
+                             Importance),
+             fill = Sign)) +
+  geom_col() +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(y = NULL) +
+  theme_bw() +
+  colorspace::scale_fill_discrete_qualitative()
+```
+
+```{r coefs-lasso}
+lasso_grid_coefs <- lasso_grid %>% 
+  select(id, .extracts) %>% 
+  unnest(.extracts) %>% 
+  unnest(.extracts)
+
+p <- lasso_grid_coefs %>% 
+  ggplot() + 
+  geom_line(aes(x = lambda, 
+                y = estimate, 
+                group = term,
+                colour = term)) +
+  scale_x_log10() +
+  labs(title = "effect on lambda on feature coefficients") +
+  theme_bw()  
+
+plotly::ggplotly(p)
+```
+
+```{r vif-tab}
+lm_fit <- stats::lm(formula = log(fire_count + 1) ~ . -id -year -month,
+                    data = model_df2)
+
+car::vif(lm_fit) %>% 
+  as_tibble(rownames = "variable") %>% 
+  rename(VIF = value) %>% 
+  # extract variables with highest VIF 
+  slice_max(VIF, 
+            n = 6) %>% 
+  kable(digits = 2,
+        caption = "Variables with largest Variance Inflation Factors(VIF)") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+### Random Forest 
+RF does not work with NAs. With NAs, rf will omit the NAs or impute the values. imputing the values wont work in this case. 
+
+```{r}
+train_final <- train %>% 
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-year) %>% mutate(month = as.factor(month))
+
+set.seed(2021)
+randomforest1 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity")
+randomforest1
+```
+Training MSE: 2.189
+R-squared: 0.382
+ 
+```{r test-summary}
+test2 <- test %>%
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-id, -year) %>%
+  mutate(month = as.factor(month))
+
+predicted <- predict(randomforest1, test2)$predictions
+
+# Function for evaluating model
+model_summary <- function(truth, estimate){
+  
+  df_new <- data.frame(truth = truth,
+                       estimate = estimate)
+  
+  data.frame(RMSE = rmse_vec(truth, estimate),
+             MAE = mae_vec(truth, estimate),
+             "R-Square" = rsq_vec(truth, estimate),
+             check.names = F
+             ) %>% 
+    mutate(MSE = mean((truth - estimate)^2))
+}
+
+kable(model_summary(truth = test2$fire_count,
+           estimate = predicted))
+```
+Test MSE: 2.378
+R-squared: 0.227 
+
+### using the new data
+```{r}
+data <- data %>% mutate(id = as.factor(id))
+```
+
+
+```{r}
+data_final <- data %>% 
+  na.omit() %>% 
+  dplyr::select(-year) %>% mutate(month = as.factor(month))
+
+set.seed(2021)
+randomforest_final <- ranger(fire_count ~ .-id, data = data_final, importance = "impurity")
+randomforest_final
+```
+
+```{r test-summary}
+test2 <- test %>%
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-id, -year) %>%
+  mutate(month = as.factor(month))
+
+predicted <- predict(randomforest_final, test2)$predictions
+
+# Function for evaluating model
+model_summary <- function(truth, estimate){
+  
+  df_new <- data.frame(truth = truth,
+                       estimate = estimate)
+  
+  data.frame(RMSE = rmse_vec(truth, estimate),
+             MAE = mae_vec(truth, estimate),
+             "R-Square" = rsq_vec(truth, estimate),
+             check.names = F
+             ) %>% 
+    mutate(MSE = mean((truth - estimate)^2))
+}
+
+kable(model_summary(truth = test2$fire_count,
+           estimate = predicted))
+```
+
+```{r}
+saveRDS(randomforest_final, "rfmodel_final.rds")
+```
+
+### not including month in the mmodel
+```{r}
+set.seed(2021)
+rfmodel <- ranger(fire_count ~ .-id -month, data = train_final, importance = "impurity")
+rfmodel
+```
+
+```{r}
+saveRDS(rfmodel, "rfmodel2.rds")
+```
+
+
+### features selection
+```{r}
+set.seed(2021)
+train2 <- train_final %>% dplyr::select(-fire_count)
+
+explainer <- lime(x = train2,
+                  model = randomforest1) 
+
+# dealing with model_type error
+model_type.randomForest <- function(x){
+  return("regression") # for regression problem
+}
+
+predict_model.randomForest <- function(x, newdata, type = "response") {
+
+    # return prediction value
+    predict(x, newdata) %>% as.data.frame()
+    
+}
+
+# sampling data
+data_low <- train_final %>% filter(fire_count < 5)
+data_high <- train_final %>% filter(fire_count>5)
+
+set.seed(2021)
+lime_sample1 <- sample(1:length(data_low),4)
+lime_sample2 <- sample(1:length(data_high),4)
+
+data_selected1 <- data_low[lime_sample1, ]
+data_selected2 <- data_high[lime_sample2, ]
+data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
+  dplyr::select(-fire_count)
+
+# creating explanation
+explanation <- explain(x = data_selected,
+                       explainer = explainer, 
+                       feature_select = "auto",
+                       n_features = 15)
+
+explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
+explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
+```   
+
+
+```{r plot-features}
+plot_features(explanation1)
+```
+
+
+```{r plot-features2}
+plot_features(explanation2)
+```
+
+### using the new model
+```{r}
+set.seed(2021)
+data_final2 <- data_final %>% dplyr::select(-fire_count)
+
+explainer <- lime(x = data_final2,
+                  model = randomforest_final) 
+
+# dealing with model_type error
+model_type.randomForest <- function(x){
+  return("regression") # for regression problem
+}
+
+predict_model.randomForest <- function(x, newdata, type = "response") {
+
+    # return prediction value
+    predict(x, newdata) %>% as.data.frame()
+    
+}
+
+# sampling data
+data_low <- data_final %>% filter(fire_count < 5)
+data_high <- data_final %>% filter(fire_count>5)
+
+set.seed(2021)
+lime_sample1 <- sample(1:length(data_low),4)
+lime_sample2 <- sample(1:length(data_high),4)
+
+data_selected1 <- data_low[lime_sample1, ]
+data_selected2 <- data_high[lime_sample2, ]
+data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
+  dplyr::select(-fire_count)
+
+# creating explanation
+explanation <- explain(x = data_selected,
+                       explainer = explainer, 
+                       feature_select = "auto",
+                       n_features = 15)
+
+explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
+explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
+```   
+
+
+```{r plot-features}
+plot_features(explanation1)
+```
+
+
+```{r plot-features2}
+plot_features(explanation2)
+```
+
+
+### fitting model based on these important variables
+```{r}
+set.seed(2021)
+randomforest2 <- ranger(fire_count ~ max_temp + month + si10 + radiation + lai_hv_1 + s0_pct + et_short_crop + max_temp_2 + daily_rain + lai_hv + s0_pct_1 + si10_1 + daily_rain_1 + si10_2 + rh + si10_2 + radiation_2 + forest + et_short_crop_2 +daily_rain_2 + x + y, data = train_final)
+randomforest2
+```
+
+```{r}
+predicted2 <- predict(randomforest2, test2)$predictions
+
+kable(model_summary(truth = test2$fire_count,
+           estimate = predicted2))
+```
+better on training but worse on test
+
+conclusion: model with all predictors is better.
+
+### parameter tuning
+```{r}
+library(tuneRanger)
+set.seed(21)
+train_final3 <- train_final %>%
+  ungroup() %>% 
+  dplyr::select(-id)
+task <- makeRegrTask(data = train_final3, target = "fire_count")
+tuning <- tuneRanger(task, num.trees = 500)
+
+tuning
+```
+
+```{r}
+tuning$model
+```
+
+```{r test-summary2}
+set.seed(2021)
+randomforest3 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity",num.threads=8,verbose=FALSE,mtry=8,min.node.size=2,num.trees=500,replace=FALSE)
+randomforest3
+```
+```{r}
+predicted3 <- predict(randomforest3, test2)$predictions
+
+kable(model_summary(truth = test2$fire_count,
+           estimate = predicted3))
+```
+better on training but worse on test. 
+we decided to use the untuned model. 
+
+
+```{r}
+varimp <- data.frame(importance = randomforest_final$variable.importance)
+df <- rownames_to_column(varimp, "var")
+df
+```
+
+
+```{r}
+ ggplot(df, aes(x=reorder(var,importance), y=importance,fill=importance))+ 
+      geom_bar(stat="identity", position="dodge")+ coord_flip()+
+      ylab("Variable Importance")+
+      xlab("")+
+      guides(fill=F)
+```
+
+### performance on training vs test set of the observed vs predicted
+```{r map-rf1, warning = FALSE, message = FALSE}
+
+tmap_arrange(actual_oct, pred_oct,
+             actual_nov, pred_nov,
+             actual_dec, pred_dec,
+             actual_jan, pred_jan,
+             actual_feb, pred_feb,
+             actual_mar, pred_mar,ncol = 4, nrow = 3)
+```
+
+```{r map-rf-test, warning = FALSE, message = FALSE}
+
+
+tmap_arrange( test_actual_oct, test_pred_oct,
+              test_actual_nov, test_pred_nov,
+              test_actual_dec, test_pred_dec,
+              test_actual_jan, test_pred_jan,
+              test_actual_feb, test_pred_feb,
+              test_actual_mar, test_pred_mar, nrow = 3, ncol = 4)
+```
+
+## writing model object
+```{r}
+saveRDS(randomforest1, "rfmodel.rds")
+model <- readRDS("rfmodel.rds")
+```
+
+
+- comparison for pred and actual values
+```{r}
+# on training set
+train_joined <- train_final %>% bind_cols(pred = randomforest1$predictions)
+
+ggplot(train_joined, aes(x = fire_count, 
+                      y = pred)) +
+  geom_point() +
+  ylab("Predicted") +
+  xlab("Actual")
+```
+
+```{r}
+# on test set
+test_joined <- test2 %>% bind_cols(pred = predicted)
+
+ggplot(test_joined, aes(x = fire_count, 
+                      y = pred)) +
+  geom_point() +
+  ylab("Predicted") +
+  xlab("Actual")
+```
+
+### RF model for each cell id [NOT USED]
+```{r}
+no_of_id <- unique(train$id)
+
+# making predictions
+# without log scale
+set.seed(2021)
+pred_values <- vector()
+for (i in 1:length(no_of_id)) {
+  data <- train %>% dplyr::select(-year) %>% filter(id == no_of_id[i])
+  rfmodel <-  randomForest(fire_count ~ .-id, data = data, importance = TRUE, mtry = 9, ntree = 447) 
+  predicted_values <- rfmodel$predicted 
+  for (j in 1:length(predicted_values)) {
+  pred_values <- append(pred_values, predicted_values[j])
+  }
+}
+pred_count <- as.data.frame(pred_values) 
+final_data <- train %>%
+  bind_cols(pred_count)
+         
+comparison <- final_data %>% 
+  dplyr::select(id, month, pred_values, fire_count)
+
+# calculating MSE
+mean((comparison$fire_count - comparison$pred_values)^2)
+
+# creating scatter plot
+ggplot(comparison, aes(x = fire_count,
+                       y = pred_values)) +
+  geom_point()
+```
+### October
+```{r}
+pred_oct_final <- final_data %>% 
+  dplyr::filter(month == 10) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_oct_final <- dataframe %>%
+  left_join(pred_oct_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0)) 
+
+data_oct_final <- data_oct_final %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(data_oct_final) = c("x", "y")
+oct_raster <- rasterFromXYZ(data_oct_final)
+
+oct_pred2 <- tm_shape(oct_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "October")
+
+# actual data
+oct_data <- final_data %>%
+  filter(month == 10) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+oct_data <- dataframe %>%
+  left_join(oct_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+oct_data <- oct_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(oct_data) = c("x", "y")
+oct_raster_actual <- rasterFromXYZ(oct_data)
+
+oct_actual2 <- tm_shape(oct_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+### November
+```{r}
+pred_nov_final <-final_data %>% 
+  dplyr::filter(month == 11) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_nov_final <- dataframe %>%
+  left_join(pred_nov_final) %>%
+  dplyr::select(id,pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_nov_final <- data_nov_final %>% left_join(lonlat) %>% 
+   dplyr::select(-id)
+
+coordinates(data_nov_final) = c("x", "y")
+nov_raster <- rasterFromXYZ(data_nov_final)
+
+nov_pred2 <- tm_shape(nov_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "November")
+
+# actual data
+nov_data <- final_data %>%
+  filter(month == 11) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+nov_data <- dataframe %>%
+  left_join(nov_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+nov_data <- nov_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(nov_data) = c("x", "y")
+nov_raster_actual <- rasterFromXYZ(nov_data)
+
+nov_actual2 <- tm_shape(nov_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+### decmeber
+```{r}
+pred_dec_final <- final_data %>% 
+  dplyr::filter(month == 12) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_dec_final <- dataframe %>%
+  left_join(pred_dec_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_dec_final <- data_dec_final %>% left_join(lonlat) %>% 
+   dplyr::select(-id)
+
+coordinates(data_dec_final) = c("x", "y")
+dec_raster <- rasterFromXYZ(data_dec_final)
+
+dec_pred2 <- tm_shape(dec_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title="December")
+
+# actual data
+dec_data <- final_data %>%
+  filter(month == 12) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+dec_data <- dataframe %>%
+  left_join(dec_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+dec_data <- dec_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(dec_data) = c("x", "y")
+dec_raster_actual <- rasterFromXYZ(dec_data)
+
+dec_actual2 <- tm_shape(dec_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+### january
+```{r}
+pred_jan_final <- final_data %>% 
+  dplyr::filter(month == 1) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_jan_final <- dataframe %>%
+  left_join(pred_jan_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_jan_final <- data_jan_final %>% left_join(lonlat) %>% 
+   dplyr::select(-id)
+
+coordinates(data_jan_final) = c("x", "y")
+jan_raster <- rasterFromXYZ(data_jan_final)
+
+jan_pred2 <- tm_shape(jan_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "January")
+
+# actual data
+jan_data <- final_data %>%
+  filter(month == 1) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+jan_data <- dataframe %>%
+  left_join(jan_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+jan_data <- jan_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(jan_data) = c("x", "y")
+jan_raster_actual <- rasterFromXYZ(jan_data)
+
+jan_actual2 <- tm_shape(jan_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+### february
+```{r}
+pred_feb_final <- final_data %>% 
+  dplyr::filter(month == 2) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_feb_final <- dataframe %>%
+  left_join(pred_feb_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_feb_final <- data_feb_final %>% left_join(lonlat) %>% 
+   dplyr::select(-id)
+
+coordinates(data_feb_final) = c("x", "y")
+feb_raster <- rasterFromXYZ(data_feb_final)
+
+feb_pred2 <- tm_shape(feb_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "February") 
+
+#actual data
+feb_data <- final_data %>%
+  filter(month ==2) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+feb_data <- dataframe %>%
+  left_join(feb_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+feb_data <- feb_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(feb_data) = c("x", "y")
+feb_raster_actual <- rasterFromXYZ(feb_data)
+
+feb_actual2 <- tm_shape(feb_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+### march 
+```{r}
+pred_mar_final <- final_data %>% 
+  dplyr::filter(month == 3) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_mar_final <- dataframe %>%
+  left_join(pred_mar_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_mar_final <- data_mar_final %>% left_join(lonlat) %>% 
+   dplyr::select(-id)
+
+coordinates(data_mar_final) = c("x", "y")
+mar_raster <- rasterFromXYZ(data_mar_final)
+
+mar_pred2 <- tm_shape(mar_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "March",
+            legend.position = c("right", "top"))
+
+# actual data
+mar_data <- final_data %>%
+  filter(month == 3) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+mar_data <- dataframe %>%
+  left_join(mar_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+mar_data <- mar_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(mar_data) = c("x", "y")
+mar_raster_actual <- rasterFromXYZ(mar_data)
+
+mar_actual2 <- tm_shape(mar_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) 
+```
+
+- arranging in one plot
+```{r, warning = FALSE, message = FALSE}
+tmap_arrange(oct_pred2, oct_actual2,
+             nov_pred2, nov_actual2,
+             dec_pred2, dec_actual2,
+             jan_pred2, jan_actual2,
+             feb_pred2, feb_actual2,
+             mar_pred2, mar_actual2)
+```
+
+```{r}
+
+rfmodel <- function(data){
+  set.seed(2021)
+  
+  no_of_id <- unique(data$id)
+  
+  pred_values <- vector()
+  for (i in 1:length(no_of_id)) {
+    data2 <- data %>% filter(id == no_of_id[i]) %>% mutate(month = as.factor(month))
+    rfmodel <-  randomForest(fire_count ~ .-id, data = data2, importance = TRUE, mtry = 9, ntree = 447) 
+    predicted_values <- rfmodel$predicted 
+    for (j in 1:length(predicted_values)) {
+    pred_values <- append(pred_values, predicted_values[j])
+    }
+  }
+  pred_count <- as.data.frame(pred_values) 
+  final_data <- data %>% bind_cols(pred_count)
+  
+  final_data
+}
+  
+rfmodel(train)
+
+```
+
+
+```{r}
+train4 <- train %>% dplyr::select(-year)
+
+# predict function
+predicting <- function(train_data, test_data) {
+  no_of_id2 <- unique(test_data$id)
+  
+  no_of_id <- unique(train_data$id)
+  
+  final_predicted <- c()
+  for (i in 1:length(no_of_id2)) {
+    
+   data2 <- train_data %>% filter(id == no_of_id[i]) %>% mutate(month = as.factor(month))
+   
+   test_data2 <- test_data %>% filter(id == no_of_id[i])
+   
+   rfmodel <-  randomForest(fire_count ~ .-id, data = data2, importance = TRUE, mtry = 9, ntree = 447) 
+   
+   predicted_values <- predict(rfmodel, test_data2)
+   
+   pred_data <- test_data2 %>% mutate(pred = predicted_values)
+   
+   final_predicted <- final_predicted %>% bind_rows(pred_data)
+  }
+  
+  final_predicted
+}
+
+predicted_test <- predicting(train4, test2)
+```
+
+general rf tends to underpredicting.
+individual rf tends to overpredicting.
+
+
+
+```{r}
+predicted_test_data <- tibble(pred = predicted2) %>%
+  bind_cols(test2)
+test_oct <- test2 %>% filter(month == 10) %>%
+ left_join(lonlat) %>%
+  ungroup() %>%
+  dplyr::select(x,y,fire_count)
+coordinates(test_oct) = c("x", "y")
+test_oct_raster <- rasterFromXYZ(test_oct)
+test_actual_oct <- tm_shape(test_oct_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "October")
+# pred data
+test_oct_pred <- predicted_test_data %>%
+  filter(month == 10) %>%
+  dplyr::select(id,pred) %>%
+  left_join(lonlat) %>%
+   dplyr::select(-id)
+coordinates(test_oct_pred) = c("x", "y")
+pred_oct_test_raster <- rasterFromXYZ(test_oct_pred)
+test_pred_oct <- tm_shape(pred_oct_test_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+# for nov
+test_nov <- test2 %>% filter(month == 11) %>%
+ left_join(lonlat) %>%
+  ungroup() %>%
+  dplyr::select(x,y,fire_count)
+coordinates(test_nov) = c("x", "y")
+test_nov_raster <- rasterFromXYZ(test_nov)
+test_actual_nov <- tm_shape(test_nov_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "November")
+# pred data
+test_nov_pred <- predicted_test_data %>%
+  filter(month == 11) %>%
+  dplyr::select(id,pred) %>%
+  left_join(lonlat) %>%
+   dplyr::select(-id)
+coordinates(test_nov_pred) = c("x", "y")
+pred_nov_test_raster <- rasterFromXYZ(test_nov_pred)
+test_pred_nov <- tm_shape(pred_nov_test_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+# for dec
+test_dec <- test2 %>% filter(month == 12) %>%
+ left_join(lonlat) %>%
+  ungroup() %>%
+  dplyr::select(x,y,fire_count)
+coordinates(test_dec) = c("x", "y")
+test_dec_raster <- rasterFromXYZ(test_dec)
+test_actual_dec <- tm_shape(test_dec_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "December")
+# pred data
+test_dec_pred <- predicted_test_data %>%
+  filter(month == 12) %>%
+  dplyr::select(id,pred) %>%
+  left_join(lonlat) %>%
+   dplyr::select(-id)
+coordinates(test_dec_pred) = c("x", "y")
+pred_dec_test_raster <- rasterFromXYZ(test_dec_pred)
+test_pred_dec <- tm_shape(pred_dec_test_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+# for jan
+test_jan <- test2 %>% filter(month == 1) %>%
+ left_join(lonlat) %>%
+  ungroup() %>%
+  dplyr::select(x,y,fire_count)
+coordinates(test_jan) = c("x", "y")
+test_jan_raster <- rasterFromXYZ(test_jan)
+test_actual_jan <- tm_shape(test_jan_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "January")
+# pred data
+test_jan_pred <- predicted_test_data %>%
+  filter(month == 1) %>%
+  dplyr::select(id,pred) %>%
+  left_join(lonlat) %>%
+   dplyr::select(-id)
+coordinates(test_jan_pred) = c("x", "y")
+pred_jan_test_raster <- rasterFromXYZ(test_jan_pred)
+test_pred_jan <- tm_shape(pred_jan_test_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+# for feb
+test_feb <- test2 %>% filter(month ==2) %>%
+ left_join(lonlat) %>%
+  ungroup() %>%
+  dplyr::select(x,y,fire_count)
+coordinates(test_feb) = c("x", "y")
+test_feb_raster <- rasterFromXYZ(test_feb)
+test_actual_feb <- tm_shape(test_feb_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "February")
+# pred data
+test_feb_pred <- predicted_test_data %>%
+  filter(month == 2) %>%
+  dplyr::select(id,pred) %>%
+  left_join(lonlat) %>%
+   dplyr::select(-id)
+coordinates(test_feb_pred) = c("x", "y")
+pred_feb_test_raster <- rasterFromXYZ(test_feb_pred)
+test_pred_feb <- tm_shape(pred_feb_test_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+# for march
+test_mar <- test2 %>% filter(month == 3) %>%
+ left_join(lonlat) %>%
+  ungroup() %>%
+  dplyr::select(x,y,fire_count)
+coordinates(test_mar) = c("x", "y")
+test_mar_raster <- rasterFromXYZ(test_mar)
+test_actual_mar <- tm_shape(test_mar_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "March")
+# pred data
+test_mar_pred <- predicted_test_data %>%
+  filter(month == 3) %>%
+  dplyr::select(id,pred) %>%
+  left_join(lonlat) %>%
+   dplyr::select(-id)
+coordinates(test_mar_pred) = c("x", "y")
+pred_mar_test_raster <- rasterFromXYZ(test_mar_pred)
+test_pred_mar <- tm_shape(pred_mar_test_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+```{r map-rf-test2, fig.cap = "A map of the monthly fire counts of the actual vs the predicted values resulted from the cell-specific random forest model for the test set.", warning = FALSE, message = FALSE}
+tmap_arrange( test_actual_oct, test_pred_oct,
+              test_actual_nov, test_pred_nov,
+              test_actual_dec, test_pred_dec,
+              test_actual_jan, test_pred_jan,
+              test_actual_feb, test_pred_feb,
+              test_actual_mar, test_pred_mar)
+```
+
+-----
+
+wanna create the residuals for each cell id based per month. So instead of what we did beforem, we make it residuals. (observed - fitted) --> create a plot for observed vs fitted as well
+```{r}
+# for the training set
+residual <- train_joined %>% 
+  mutate(residual = fire_count - pred) %>%
+  dplyr::select(x, y, month, residual) 
+
+mean_residual <- residual %>%
+  group_by(x,y, month) %>%
+  summarise(mean_residual = mean(residual))
+
+res_oct <- mean_residual %>% filter(month == 10) %>% dplyr::select(-month)
+coordinates(res_oct) = c("x", "y")
+res_oct_raster <- rasterFromXYZ(res_oct)
+res_oct_plot <- tm_shape(res_oct_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "October")
+
+res_nov <- mean_residual %>% filter(month == 11) %>% dplyr::select(-month)
+coordinates(res_nov) = c("x", "y")
+res_nov_raster <- rasterFromXYZ(res_nov)
+res_nov_plot <- tm_shape(res_nov_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "November")
+
+res_dec <- mean_residual %>% filter(month == 12) %>% dplyr::select(-month)
+coordinates(res_dec) = c("x", "y")
+res_dec_raster <- rasterFromXYZ(res_dec)
+res_dec_plot <- tm_shape(res_dec_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "December")
+
+res_jan <- mean_residual %>% filter(month == 1) %>% dplyr::select(-month)
+coordinates(res_jan) = c("x", "y")
+res_jan_raster <- rasterFromXYZ(res_jan)
+res_jan_plot <- tm_shape(res_jan_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "January")
+
+res_feb <- mean_residual %>% filter(month == 2) %>% dplyr::select(-month)
+coordinates(res_feb) = c("x", "y")
+res_feb_raster <- rasterFromXYZ(res_feb)
+res_feb_plot <- tm_shape(res_feb_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "February")
+
+res_mar <- mean_residual %>% filter(month == 3) %>% dplyr::select(-month)
+coordinates(res_mar) = c("x", "y")
+res_mar_raster <- rasterFromXYZ(res_mar)
+res_mar_plot <- tm_shape(res_mar_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "March")
+
+```
+
+```{r, message=FALSE, warning = FALSE}
+tmap_arrange(res_oct_plot, res_nov_plot, res_dec_plot, res_jan_plot, res_feb_plot, res_mar_plot)
+```
+
+
+```{r}
+test_final <- test %>%
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-year)
+predicted_test <- test_final %>% bind_cols(tibble(pred = predict(randomforest1, test_final)$predictions))
+
+residual_test <- predicted_test %>% 
+  mutate(residual = fire_count - pred) %>%
+  ungroup() %>%
+  dplyr::select(x,y,residual, month)
+
+res_test_oct <- residual_test %>% filter(month == 10) %>% dplyr::select(-month)
+coordinates(res_test_oct) = c("x", "y")
+res_test_oct_raster <- rasterFromXYZ(res_test_oct)
+res_test_oct_plot <- tm_shape(res_test_oct_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "October")
+
+res_test_nov <- residual_test %>% filter(month == 11) %>% dplyr::select(-month)
+coordinates(res_test_nov) = c("x", "y")
+res_test_nov_raster <- rasterFromXYZ(res_test_nov)
+res_test_nov_plot <- tm_shape(res_test_nov_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "November")
+
+res_test_dec <- residual_test %>% filter(month == 12) %>% dplyr::select(-month)
+coordinates(res_test_dec) = c("x", "y")
+res_test_dec_raster <- rasterFromXYZ(res_test_dec)
+res_test_dec_plot <- tm_shape(res_dec_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "December")
+
+res_test_jan <- residual_test %>% filter(month == 1) %>% dplyr::select(-month)
+coordinates(res_test_jan) = c("x", "y")
+res_test_jan_raster <- rasterFromXYZ(res_test_jan)
+res_test_jan_plot <- tm_shape(res_test_jan_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "January")
+
+res_test_feb <- residual_test %>% filter(month == 2) %>% dplyr::select(-month)
+coordinates(res_test_feb) = c("x", "y")
+res_test_feb_raster <- rasterFromXYZ(res_test_feb)
+res_test_feb_plot <- tm_shape(res_test_feb_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "February")
+
+res_test_mar <- residual_test %>% filter(month == 3) %>% dplyr::select(-month)
+coordinates(res_test_mar) = c("x", "y")
+res_test_mar_raster <- rasterFromXYZ(res_test_mar)
+res_test_mar_plot <- tm_shape(res_test_mar_raster) +
+  tm_raster(style = "cont", 
+            palette = "RdYlGn",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3) +
+  tm_layout(title = "March")
+
+```
+
+```{r, message=FALSE, warning = FALSE}
+tmap_arrange(res_test_oct_plot, res_test_nov_plot, res_test_dec_plot, res_test_jan_plot, res_test_feb_plot, res_test_mar_plot)
+```
+
+
+```{r}
+ggplot(predicted_test, aes(x = pred,
+                           y = fire_count)) +
+  geom_point()
+```
+
+-- so much differences? -- 
+
+## see how much risk would change if we change the variables
+- cell 237
+```{r}
+test_237 <- test2 %>%
+  filter(id == 237) 
+
+test_237 <- test_237 %>%
+  bind_cols(pred = predict(randomforest1, test_237)$predictions)
+
+for (i in 1:10) {
+  temp <- test_237
+  temp$max_temp <- temp$max_temp + i
+  test_237 <- test_237 %>% bind_cols(new_pred = predict(randomforest1, temp)$predictions)
+}
+test_237_2 <- test_237 %>%
+  ungroup() %>%
+  rename("0" = pred, 
+         "+1" = `new_pred...35`,
+         "+2" = `new_pred...36`,
+         "+3" = new_pred...37,
+         "+4" = new_pred...38,
+         "+5" = new_pred...39,
+         "+6" = new_pred...40, 
+         "+7" = new_pred...41,
+         "+8" = new_pred...42,
+         "+9" = new_pred...43,
+         "+10" = new_pred...44)
+  
+test_237_2 <- test_237_2 %>% dplyr::select(month, `0`:`+10`) %>% pivot_longer(2:12, names_to = "Increase_by", values_to = "new_pred" ) %>%
+  mutate(month = factor(month, levels = c(10,11,12,1,2,3)))
+
+ggplot(test_237_2, aes(x = Increase_by, 
+                       y = new_pred)) +
+  geom_point() +
+  facet_grid(~month)
+```
+
+```{r}
+test <- test %>% left_join(lonlat)
+test_predicted <- test %>%
+  bind_cols(pred = predict(randomforest1, test)$predictions)
+
+for (i in 1:10) {
+  temp <- test_237
+  temp$max_temp <- temp$max_temp + i
+  test_predicted <- test_predicted %>% bind_cols(new_pred = predict(randomforest1, temp)$predictions)
+}
+test_predicted2 <- test_predicted %>%
+  ungroup() %>%
+  rename("0" = pred, 
+         "+1" = `new_pred...35`,
+         "+2" = `new_pred...36`,
+         "+3" = new_pred...37,
+         "+4" = new_pred...38,
+         "+5" = new_pred...39,
+         "+6" = new_pred...40, 
+         "+7" = new_pred...41,
+         "+8" = new_pred...42,
+         "+9" = new_pred...43,
+         "+10" = new_pred...44)
+  
+test_predicted2 <- test_predicted2 %>% dplyr::select(month, `0`:`+10`) %>% pivot_longer(2:12, names_to = "Increase_by", values_to = "new_pred" ) %>%
+  mutate(month = factor(month, levels = c(10,11,12,1,2,3)))
+
+ggplot(test_predicted2, aes(x = Increase_by, 
+                       y = new_pred)) +
+  geom_point() +
+  facet_grid(~month)
+```
+
+```{r}
+test_predicted %>%
+  ggplot(aes(x = max_temp,
+             y = pred)) +
+  geom_point() +
+  facet_grid(~month)
+```
+
+```{r}
+test_predicted %>%
+  ggplot(aes(x = max_temp,
+             y = fire_count)) +
+  geom_point() +
+  facet_grid(~month)
+```
+
+```{r}
+test_predicted %>%
+  ggplot(aes(x = daily_rain_2,
+             y = pred)) +
+  geom_point() +
+  facet_grid(~month, scales = "free")
+```
+
+```{r}
+test_predicted %>%
+  ggplot(aes(x = daily_rain_2,
+             y = daily_rain,
+             color = pred)) +
+  geom_point() +
+  facet_wrap(~month, scales = "free") +
+  scale_color_viridis_c() +
+  theme(aspect.ratio = 1)
+```
+
+```{r}
+
+```
+
+
+```{r}
+glimpse(test)
+```
+
+
+- cell 275
+```{r}
+test_275 <- test2 %>%
+  filter(id == 275) 
+test_275 <- test_275%>%
+  bind_cols(pred = predict(randomforest1, test_275)$predictions)
+
+for (i in 1:10) {
+  temp <- test_275
+  temp$max_temp <- temp$max_temp + i
+  test_275 <- test_275 %>% bind_cols(new_pred = predict(randomforest1, temp)$predictions)
+}
+test_275_2 <- test_275 %>%
+  ungroup() %>%
+  rename("0" = pred, 
+         "+1" = `new_pred...35`,
+         "+2" = `new_pred...36`,
+         "+3" = new_pred...37,
+         "+4" = new_pred...38,
+         "+5" = new_pred...39,
+         "+6" = new_pred...40, 
+         "+7" = new_pred...41,
+         "+8" = new_pred...42,
+         "+9" = new_pred...43,
+         "+10" = new_pred...44)
+  
+test_275_2 <- test_275_2 %>% dplyr::select(month, `0`:`+10`) %>% pivot_longer(2:12, names_to = "Increase_by", values_to = "new_pred" ) %>%
+  mutate(month = factor(month, levels = c(10,11,12,1,2,3)))
+
+ggplot(test_275_2, aes(x = Increase_by, 
+                       y = new_pred)) +
+  geom_point() +
+  facet_grid(~month)
+```
+
+- cell 172
+```{r}
+test_172 <- test2 %>%
+  filter(id == 172) 
+test_172 <- test_172 %>%
+  bind_cols(pred = predict(randomforest1, test_172)$predictions)
+
+for (i in  1:10) {
+  temp <- test_172
+  temp$max_temp <- temp$max_temp + i
+  test_172 <- test_172 %>% bind_cols(new_pred = predict(randomforest1, temp)$predictions)
+}
+test_172_2 <- test_172 %>%
+  ungroup() %>%
+  rename("0" = pred, 
+         "+1" = `new_pred...35`,
+         "+2" = `new_pred...36`,
+         "+3" = new_pred...37,
+         "+4" = new_pred...38,
+         "+5" = new_pred...39,
+         "+6" = new_pred...40, 
+         "+7" = new_pred...41,
+         "+8" = new_pred...42,
+         "+9" = new_pred...43,
+         "+10" = new_pred...44)
+  
+test_172_2 <- test_172_2 %>% dplyr::select(month, `0`:`+10`) %>% pivot_longer(2:12, names_to = "Increase_by", values_to = "new_pred" ) %>%
+  mutate(month = factor(month, levels = c(10,11,12,1,2,3)))
+
+ggplot(test_172_2, aes(x = Increase_by, 
+                       y = new_pred)) +
+  geom_point() +
+  facet_grid(~month)
+
+test_172
+```
+
+# for radiation
+- cell 237
+```{r}
+test_237 <- test2 %>%
+  filter(id == 237) 
+test_237_rad <- test_237 %>%
+  bind_cols(pred = predict(randomforest1, test_237)$predictions)
+
+for (i in 1:10) {
+  temp <- test_237
+  temp$radiation <- temp$radiation + i
+  test_237_rad <- test_237_rad %>% bind_cols(new_pred = predict(randomforest1, temp)$predictions)
+}
+test_237_2rad <- test_237_rad %>%
+  ungroup() %>%
+  rename("0" = pred, 
+         "+1" = `new_pred...35`,
+         "+2" = `new_pred...36`,
+         "+3" = new_pred...37,
+         "+4" = new_pred...38,
+         "+5" = new_pred...39,
+         "+6" = new_pred...40, 
+         "+7" = new_pred...41,
+         "+8" = new_pred...42,
+         "+9" = new_pred...43,
+         "+10" = new_pred...44)
+  
+test_237_2rad <- test_237_2rad %>% dplyr::select(month, `0`:`+10`) %>% pivot_longer(2:12, names_to = "Increase_by", values_to = "new_pred" ) %>%
+  mutate(month = factor(month, levels = c(10,11,12,1,2,3)))
+
+ggplot(test_237_2rad, aes(x = Increase_by, 
+                       y = new_pred)) +
+  geom_point() +
+  facet_grid(~month)
+```

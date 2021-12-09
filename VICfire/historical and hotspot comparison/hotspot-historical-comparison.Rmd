@@ -1,0 +1,2475 @@
+---
+title: "hotspot-historical data comparison"
+author: "Helen Evangelina"
+date: "04/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(leaflet)
+library(readr)
+library(KernSmooth)
+library(shinyWidgets)
+library(plotly)
+library(sp)
+library(mapview)
+library(leafem)
+library(rgdal)
+library(maptools)
+library(raster)
+library(DT)
+library(htmlwidgets)
+library(lubridate)
+library(forcats)
+library(purrr)
+library(sf)
+```
+
+## training data
+```{r}
+training <- read.csv(here::here("VICfire/data/training.csv"))
+  
+  training <- training %>%
+    filter(!CAUSE %in% c("BURNING BUILDING",
+                         "WASTE DISPOSAL, INDUSTRIAL, SAWMILL, TIP",
+                         "WASTE DISPOSAL, DOMESTIC",
+                         "BURNING VEHICLE, MACHINE",
+                         "BURNING BUILDING")) %>%
+    filter(new_cause != "other") %>%
+    filter(new_cause != "relight")
+  
+  
+  training <- select(training, -c(EVENTID:FIRE_NUM), -id, -CAUSE, -FOREST, -FOR_CODE, -FOR_CAT)
+  
+  training <- mutate(training,
+                     year = factor(year(FIRE_START)),
+                     month = factor(month(FIRE_START), levels = c(10,11,12,1,2,3)),
+                     day = factor(day(FIRE_START), levels = c(1:31)),
+                     wod = factor(wday(FIRE_START), levels = c(1:7)))
+  
+  training <- filter(training, month %in% c(10,11,12,1,2,3))
+  
+  training <- na.omit(training)
+  
+  training <- mutate(training, new_cause = ifelse(new_cause == "accidental_human", "accident", new_cause)) %>%
+    mutate(new_cause = ifelse(new_cause == "burning_off_human", "burning_off", new_cause)) %>%
+    mutate(new_cause = factor(new_cause)) %>%
+    mutate(FOR_TYPE = factor(FOR_TYPE))
+  
+  training <- na.omit(training)
+  
+  training <- mutate(training,
+                     log_dist_cfa = log(dist_cfa),
+                     log_dist_camp = log(dist_camp),
+                     log_dist_road = log(dist_road),
+                     COVER = factor(COVER),
+                     HEIGHT = factor(HEIGHT))
+  
+  training <- rename(training, cause = new_cause)
+  training <- mutate(training,
+                     cause = fct_relevel(cause,
+                                         "lightning",
+                                         "accident",
+                                         "arson",
+                                         "burning_off"))
+  
+  training <- na.omit(training)
+  
+  training <- select(training, -dist_road, -dist_cfa, -dist_camp, -FIRE_START)
+```
+
+available data on training.csv: 1-3, 10-12 2018 --> so we are going to use this period to compare.(we only care about the bushfire season)
+--> can divide the data to 2 --> 1-3 2018 and 10-12 2018
+
+training data is up tp dec 2018
+```{r}
+training2016 <- training %>%
+  filter((year == 2016 & month %in% c(10,11,12)) | (year == 2017 & month %in% c(1,2,3)))
+
+training2017 <- training %>%
+  filter((year == 2017 & month %in% c(10,11,12)) | (year == 2018 & month %in% c(1,2,3)))
+```
+
+## hotspot data
+This is all the wrangling processes of the hotspot data.
+```{r, eval = FALSE}
+#getting the directories with daily folder inside
+pre <- list.files("data/hotspot", "monthly", recursive=TRUE, full.names=TRUE, include.dirs=TRUE)
+pre
+
+#getting the file directories inside the daily folder
+fls <- list.files(pre, full.names = TRUE)
+fls
+
+all <- map(fls, read_csv)
+combined_data <- bind_rows(all)
+
+combined_data
+```
+
+```{r, eval = FALSE}
+# filtering the data
+filtered_data <- combined_data %>%
+    filter(between(lon, 112, 155)) %>%
+    filter(between(lat, -44, -10))
+
+# filtering hotspots by firepowewr
+filtered_data <- filtered_data %>% 
+  filter(firepower > 100)
+
+# transforming hotspots data to sf object
+filtered_data2 <- st_as_sf(x = filtered_data, coords = c('lon', 'lat'), crs = 4326)
+```
+
+```{r, eval = FALSE}
+# filtering by target states
+library(rnaturalearth)
+au_map <- ne_states(country = 'Australia', returnclass = 'sf')
+
+states <- st_intersects(au_map$geometry, filtered_data2$geometry)
+
+filtered_data2$state <-  ''
+
+  for (i in seq(1,nrow(au_map))){
+
+  filtered_data2$state[states[[i]]] <-  au_map$name[i]
+
+  }
+```
+
+```{r, eval = FALSE}
+target_area <-  c('Victoria',
+                  'New South Wales',
+                  'Northern Territory',
+                  'South Australia',
+                  'Western Australia',
+                  'Queensland',
+                  'Tasmania',
+                  'Australian Capital Territory')
+
+target_area <- target_area[1:1]
+
+filtered_data2 <- filtered_data2 %>%
+  filter(state %in% target_area)
+
+```
+
+```{r, eval = FALSE}
+# Convert hotspots data back to data frame
+coords <- st_coordinates(filtered_data2)
+st_geometry(filtered_data2) <- NULL
+filtered_data2$lon = coords[,1]
+filtered_data2$lat = coords[,2]
+```
+
+
+```{r, eval = FALSE}
+# trimming the date 
+hotspots <- filtered_data2 %>%
+  mutate(date = substr(filtered_data2$`#obstime`, 2, 20))
+```
+
+
+```{r, eval = FALSE}
+# extract time features
+hotspots$year <-  year(as.POSIXct(hotspots$date))
+hotspots$month <-  month(hotspots$date)
+  hotspots$day <-  day(hotspots$date)
+  hotspots$week <-  week(hotspots$date)
+  hotspots$hour <-  hour(hotspots$date)
+
+```
+
+```{r, eval = FALSE}
+hotspots <- arrange(hotspots, year, month, day, hour)
+
+hotspots$hour_id <- difftime(hotspots$date, min(hotspots$date), units = "hour") %>%
+    as.numeric() %>%
+    round() %>%
+    as.integer()
+
+hotspots$hour_id <- hotspots$hour_id + 1
+
+hotspots_trim_all <- hotspots %>%
+  mutate(time_id = hour_id) %>%
+  mutate(id = 1:nrow(hotspots)) %>%
+  select(id, lon, lat, time_id)
+
+hotspots_trim_all
+```
+
+```{r, eval = FALSE}
+# filtering to only 2018
+hotspots_2018 <- hotspots %>%
+  filter(year == 2018)
+```
+
+
+```{r, eval = FALSE}
+# splitting the data to month 1-3 and month 10-12
+hotspots_13 <- hotspots %>%
+  filter(month %in% c(1,2,3))
+
+hotspots_trim_13 <- hotspots_13 %>%
+  mutate(time_id = hour_id) %>%
+  mutate(id = 1:nrow(hotspots_13)) %>%
+  select(id, lon, lat, time_id)
+
+hotspots_1012 <- hotspots %>%
+  filter(month %in% c(10, 11, 12))
+
+hotspots_trim_1012 <- hotspots_1012 %>%
+  mutate(time_id = hour_id) %>%
+  mutate(id = 1:nrow(hotspots_1012)) %>%
+  select(id, lon, lat, time_id)
+```
+
+```{r, eval = FALSE}
+# writing the files
+write_csv(hotspots_trim_all, here::here("data/VIC_hotspots_before_clustering.csv"))
+write_csv(hotspots, here::here("data/VIC_hotspots_raw.csv"))
+```
+
+
+--- this is taken from the "Clustering-Python-setup.R" file-------
+
+
+## Clustering
+This section provides the clustering processes. Final data resulted from this is: 
+- predict_x_2016_2018.csv: for the bushifre period 2016-2017, 2017-2018, 2018-2019
+ - predict_x_2019_2020.csv: for the bushfire period 2019-2020 and 2020-2021
+These 2 data can be found inside the "clustering" folder inside data.
+```{r}
+library(reticulate)
+```
+
+### clustering parameters-tuning (to get clustering_grid.csv)
+```{r, eval = FALSE}
+system("python scripts/Clustering/clustering_tune.py")
+```
+
+```{python, eval = FALSE}
+from numpy import genfromtxt
+
+def read_hotspots_from_csv(file_path = 'data/VIC_hotspots_before_clustering.csv'):
+	"""
+	Read hotspots from the csv file.
+	Input: 
+		file_path: file_path and name of the csv file
+	Output:
+		ID: the unique indentifier of the hotspot
+		lon: longitude
+		lat: latitude
+		time_id: observered time formatted in indexes (discrete & integer values)
+	"""
+	data = genfromtxt(
+		file_path, 
+		delimiter = ',', 
+		skip_header = 1, 
+		dtype = [('id', 'int32'), ('lon', 'float32'), ('lat', 'float32'), ('time_id', 'int32')]
+		)
+
+	ID = data['id']
+	time_id = data['time_id']
+	lon = data['lon']
+	lat = data['lat']
+
+	return ID, lon, lat, time_id
+	
+read_hotspots_from_csv()
+```
+
+```{python, eval = FALSE}
+from tqdm import tqdm
+import numpy as np
+
+class CLUSTERER:
+	
+	def __init__(self, active_time = 24, adj_dist = 3000):
+		"""
+		Initialize the instance
+		Input:
+			active_time: length of time bushfires remain active
+			adj_dist: density-based distance used in the clustering algorithm
+		"""
+
+		self.active_time = active_time
+		self.adj_dist = adj_dist
+		self.memberships = None
+
+	def cluster(self, ID, lon, lat, time_id):
+		"""
+		Cluster hotspots into bushfires
+		Input:
+			self: instance
+			ID: unique indetifier
+			lon: a vector of longitude
+			lat: a vector of latitude
+			time_id: observered time formatted in indexes (discrete & integer values)
+		"""
+
+		# Compute the maximum timestamps
+		self.maxtime = np.max(time_id).tolist()
+
+		# Initialize the memberships
+		self.memberships = np.zeros(len(lon), dtype = "int32")
+
+
+		# Loop through every timestamp
+		for i in tqdm(range(1, self.maxtime + 1), ascii = True):
+			if np.any(time_id == i):
+
+				# Extract all revelant timestamps and compute the memberships
+				indexes = np.where((time_id <= i) & (max(1, i - self.active_time) <= time_id))
+				temp_memberships = np.zeros(len(lon), dtype = "int32")
+				temp_memberships[indexes] = self.compute_memberships(lon[indexes], lat[indexes])
+
+				# Define current timestamp and past timestamps
+				current = np.where(time_id == i)
+				past = np.where((time_id < i) & (max(1, i - self.active_time) <= time_id))
+
+				# No previous points
+				if len(current[0]) == len(indexes[0]):
+					self.memberships[indexes] = temp_memberships[indexes] + np.max(self.memberships)
+
+				else:
+
+					# Assign memberships to points in current timestamp
+					self.adjust_memberships(
+						temp_memberships,
+						current,
+						past,
+						lon,
+						lat
+						)
+
+	def adjust_memberships(self, temp_memberships, current, past, lon, lat):
+		"""
+		Adjust memberships in current timestamp based on previous clustering result
+		Input:
+			temp_memberships: memberships with incorrect labels
+			current: current timestamp
+			past: past timestamps
+			lon: a vector of longitude
+			lat: a vector of latitude
+		"""
+
+		# Convert lon and lat to radians
+		rc_lon = np.radians(lon[current])
+		rc_lat = np.radians(lat[current])
+		rp_lon = np.radians(lon[past])
+		rp_lat = np.radians(lat[past])
+
+		# Define the correctly labelled membership in current and past timestamps
+		correct_c_memberships = np.zeros(len(rc_lon), dtype = "int32")
+		correct_p_memberships = self.memberships[past]
+
+		# Collect current incorrect memberships
+		c_memberships = temp_memberships[current]
+		p_memberships = temp_memberships[past]
+
+		# New clusters
+		new_clusters = []
+
+		# Loop through every points in current timestamp
+		for i in range(len(rc_lon)):
+
+			# If the point in current timestamp share the same cluster with a point in previous timestamps
+			if np.any(c_memberships[i] == p_memberships):
+
+				# Compute the distance vector
+				distance = self.point_to_vector_geodist(rc_lon[i], rc_lat[i], rp_lon, rp_lat)
+
+				if len(p_memberships == c_memberships[i]) != len(distance):
+					raise Exception("The length of distance does not match with the length of memberships")
+
+				# Assign missing value to points not sharing the same cluster
+				distance[p_memberships != c_memberships[i]] = np.nan
+
+				# Select the non nan minium element, assign its correct past membership to the point in current timestamp 
+				correct_c_memberships[i] = correct_p_memberships[distance == np.nanmin(distance)][0]
+
+			else:
+
+				new_clusters.append(i)
+
+		# Get new clusters incorrect labels
+		correct_c_memberships[new_clusters] = self.revise_memberships(c_memberships[new_clusters])
+		correct_c_memberships[new_clusters] = correct_c_memberships[new_clusters] + np.max(self.memberships)
+
+		if np.any(correct_c_memberships == 0):
+			raise Exception("correct_c_memberships contains zeros")
+		# Assign them back to the global memberships vector
+		self.memberships[current] = correct_c_memberships
+
+
+	def revise_memberships(self, memberships):
+		"""
+		Revise memberships to let it start from 1
+		Input:
+			memberships: a vector of memberships
+		"""
+
+		# Build a replacement dict
+		dic = {key: index + 1 for index, key in enumerate(np.unique(memberships).tolist())}
+
+		# Replace the memberships
+		memberships = memberships.tolist()
+		for i in range(len(memberships)):
+			memberships[i] = dic[memberships[i]]
+
+		return np.array(memberships, dtype = "int32")
+
+
+
+
+
+
+	def compute_memberships(self, lon, lat):
+		"""
+		Compute memberships using Breadth First Search
+		Input:
+			lon: a vector of longitude
+			lat: a vector of latitude
+		Output:
+			memberships: a vector of memberships
+		"""
+
+		# Define a membership vector
+		memberships = np.zeros(len(lon), dtype = "int32")
+
+		# If there is only one point, assign 1, then return
+		if len(memberships) == 1:
+			memberships[0] = 1
+			return memberships
+
+		# Convert lon and lat to radians
+		rlon = np.radians(lon)
+		rlat = np.radians(lat)
+
+		# Define label number
+		label = 0
+
+		# While there are still unlabelled points
+		while np.any(memberships == 0):
+
+			# print(np.count_nonzero(memberships == 0))
+
+			# Define a new label
+			label = label + 1
+
+			# Find the first unlabelled point
+			first_point = np.where(memberships == 0)[0][0]
+
+			# Push the first point to the queue
+			queue = np.array(first_point, dtype = "int32")
+			queue = np.reshape(queue, (1))
+
+			# Label the first point
+			memberships[queue[0]] = label
+
+
+			# Set head and tail pointer
+			head = 0
+			tail = 0
+
+			# Start BFS
+			while head <= tail:
+
+				# print("    queue:", len(queue))
+				if len(queue) > len(lon):
+					raise Exception("length of queue out of boundary")
+				# print(queue)
+				# print(memberships)
+
+				# Computer the distance vector
+				distance = self.point_to_vector_geodist(
+					rlon[queue[head]],
+					rlat[queue[head]],
+					rlon,
+					rlat
+					)
+
+				if len(distance) != len(memberships):
+					raise Exception("The length of distance does not match with the length of memberships")
+
+				# Get the extensions of the point
+				extensions = np.where((distance <= self.adj_dist) & (memberships == 0))[0]
+
+				# print(distance)
+				# print(extensions)
+
+				# Append extensions to queue
+				queue = np.append(queue, extensions)
+
+				# Label extensions points
+				memberships[extensions] = label
+
+				# Update tail
+				tail = tail + len(extensions) 
+
+				# Update head
+				head = head + 1
+
+		return memberships
+
+
+
+
+	def point_to_vector_geodist(self, P_rlon, P_rlat, V_rlon, V_rlat):
+		"""
+		Using Haversine formulat to compute the distance from a point to a vector of points.
+		Adpoted from https://stackoverflow.com/questions/19412462/getting-distance-between-two-points-based-on-latitude-longitude.
+		Input:
+			P_rlon: radians of longitude
+			P_rlat: radians of latitude
+			V_rlon: a vector of radians of longitude
+			V_rlat: a vector of radians of latitude
+		Output:
+			distance: a vector of distance
+		"""
+
+		lon1 = P_rlon
+		lat1 = P_rlat
+		lon2 = V_rlon
+		lat2 = V_rlat
+
+		dlon = lon2 - lon1
+		dlat = lat2 - lat1
+
+		a = np.sin(dlat / 2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2)**2
+		c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+		distance = 6373.0 * c * 1000
+
+		return distance
+
+
+
+				
+```
+
+```{python, eval = FALSE}
+def read_setting_from_txt(file_path = "setting.txt"):
+	"""
+	Read setting from the txt file.
+	Input: 
+		file_path: file_path and name of the csv file
+	Output:
+		active_time: length of time bushfires remain active
+		adj_distance: density-based distance used in the clustering algorithm
+	"""
+
+	with open("scripts/Clustering/setting.txt", "r") as f:
+		dic = {"active_time": None, "adj_distance": None}
+
+		for line in f:
+			line_string = line.split('=')
+			if "active_time" in line_string[0].lower():
+				dic['active_time'] = int(line_string[1].replace(' ','').replace('\n',''))
+
+			if "adj_distance" in line_string[0].lower():
+				dic['adj_distance'] = int(line_string[1].replace(' ','').replace('\n',''))
+
+		if None in dic.values():
+			raise Exception("Either value of active_time or adj_distance doesn't exist.")
+
+		return dic['active_time'], dic['adj_distance']
+		
+
+```
+
+```{python, eval = FALSE}
+from os import remove
+
+def main():
+
+	ID, lon, lat, time_id = read_hotspots_from_csv()
+
+	try:
+		remove("data/clustering_grid.csv")
+	except OSError:
+		pass
+
+	with open('data/clustering_grid.csv', 'a') as f:
+		f.write("active_time,adj_dist,count\n")
+
+	for active_time in [x * 3 for x in range(1, 13)]:
+		for adj_dist in [x * 1000 for x in range(1, 11)]:
+
+			print("Running", active_time, adj_dist)
+	
+			clusterer = CLUSTERER(
+				active_time = active_time,
+				adj_dist = adj_dist
+				)
+
+			clusterer.cluster(
+				ID = ID, 
+				lon = lon, 
+				lat = lat, 
+				time_id = time_id
+				)
+
+			count = max(clusterer.memberships.tolist())
+
+			with open('data/clustering_grid.csv', 'a') as f:
+				f.write("{},{},{}\n".format(active_time, adj_dist, count))
+
+			print("count:", count)
+
+			del clusterer
+
+
+
+
+
+if __name__ == "__main__":
+	main()
+```
+
+### choose optimal parameters for clustering (to get setting.txt)
+```{r, eval = FALSE}
+system("Rscript scripts/Clustering/clustering_tune_vis.R")
+```
+
+----from VIC_hotspot_before_clustering.csv to VIC_hotspot_after_clustering.csv-----
+
+```{r Hotspots-Clustering, eval = FALSE}
+# Cluster hotspots into bushfires
+# Runtime: 6 minutes
+# Input: VIC_hotspots_before_clustering.csv
+# Output: VIC_hotspots_after_clustering.csv, summary.txt
+  system("python scripts/Clustering/main.py")
+
+```
+
+### getting the predict_x_new.csv
+```{r, eval = FALSE}
+system("Rscript scripts/Training/combine_current.R")
+```
+
+
+*notes:
+- year 2016 refers to bushfire period 2016-2017, and so on
+
+## loading data
+```{r}
+# loading the clustered data
+hotspot2016_2018 <- read.csv(here::here("VICfire/data/clustering/predict_x_2016_2018.csv"))
+hotspot2019_2020 <- read.csv(here::here("VICfire/data/clustering/predict_x_2019_2020.csv"))
+
+hotspot2016_2018 <- hotspot2016_2018 %>%
+  mutate(year = year(time),
+         month = month(time))
+
+hotspot2019_2020 <- hotspot2019_2020 %>%
+  mutate(year = year(time),
+         month = month(time))
+
+hotspot2016 <- hotspot2016_2018 %>%
+  filter((year == 2016 & month %in% c(10,11,12)) | (year == 2017 & month %in% c(1,2,3)))
+
+hotspot2017 <- hotspot2016_2018 %>%
+  filter((year == 2017 & month %in% c(10,11,12)) | (year == 2018 & month %in% c(1,2,3)))
+
+hotspot2018 <- hotspot2016_2018 %>%
+  filter((year == 2018 & month %in% c(10,11,12)) | (year == 2019 & month %in% c(1,2,3)))
+
+hotspot2019 <- hotspot2019_2020 %>%
+  filter((year == 2019 & month %in% c(10,11,12)) | (year == 2020 & month %in% c(1,2,3)))
+
+hotspot2020 <- hotspot2019_2020 %>%
+  filter((year == 2020 & month %in% c(10,11,12)) | (year == 2021 & month %in% c(1,2,3)))
+```
+
+## comparing the raw hotspot data with the traaining data (for 2017-2018) (NO NEED TO COMPARE WITH RAW)
+```{r}
+training2017_2 <- training2017
+coordinates(training2017_2) = c("lon", "lat")
+```
+
+```{r}
+x1 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.6, 
+            crs = "+proj=longlat +datum=WGS84")
+
+x1[] <- 0
+
+tab1 <- table(cellFromXY(x1, training2017_2))
+
+x1[as.numeric(names(tab1))] <- tab1
+
+```
+
+total in training2017 = 947
+
+```{r}
+# creating proportions
+df1 <- data.frame(coordinates(x1), count = x1[])
+df1 <- df1 %>% 
+  mutate(prop2017 = count/947)  %>%
+  dplyr::select(-count)
+```
+
+
+```{r, eval = FALSE}
+# hotspot data
+hotspot2017_2 <- hotspot2017
+coordinates(hotspot2017_2) <- c("lon", "lat")
+
+xh_2017 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.6, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xh_2017[] <- 0
+
+tabh_2017 <- table(cellFromXY(xh_2018, hotspots_2018_2))
+
+xh_2018[as.numeric(names(tabh_2018))] <- tabh_2018
+```
+
+```{r, include=FALSE}
+plot(x1)
+points(training_2018_2, pch = 20)
+
+plot(xh_2018)
+points(hotspots_2018_2, pch = 20)
+```
+
+total in hotspots = 5074
+most of the data in hotspots are from month 1-3. so little data from month 10-12
+
+```{r, include = FALSE}
+# creating proportions
+dfh_2018 <- data.frame(coordinates(xh_2018), count = xh_2018[])
+dfh_2018 <- dfh_2018 %>% 
+  mutate(prop_h2018 = count/5074)  %>%
+  dplyr::select(-count)
+dfh_2018
+```
+
+```{r, include = FALSE}
+#creating scatter plot
+df_joined_2018 <- df1 %>%
+  left_join(dfh_2018, by = c("x", "y")) %>%
+  mutate(diff = prop2018 - prop_h2018,
+         id = 1:120) 
+
+df_joined_2018 %>%
+  group_by(x, y) %>%
+  ggplot(aes(x = prop2018,
+             y = prop_h2018,
+             label = id)) +
+  geom_text() +
+  ggtitle("without clustering 2018")
+ggplotly()
+```
+
+```{r, include=FALSE}
+df_joined_2018 %>%
+  ggplot(aes(x = id,
+             y = diff)) +
+  geom_point() +
+  ggtitle("without clustering 2018")
+```
+
+
+
+
+## clustered hotspot data
+```{r}
+training2017_selected <- training2017 %>%
+  select(lon, lat, year, month) %>%
+  mutate(type = "training")
+
+hotspot2017_2 <- hotspot2017 %>%
+  select(-id, -time) %>%
+  mutate(type = "hotspot")
+
+# converting to factor
+hotspot2017_2$year <- as.factor(hotspot2017_2$year)
+hotspot2017_2$month <- as.factor(hotspot2017_2$month)
+
+joined_2017 <- training2017_selected %>%
+  bind_rows(hotspot2017_2)
+```
+
+```{r}
+#comparing distribution
+joined_2017 %>%
+  count(month, type) %>%
+  group_by(type) %>%
+  ggplot(aes(x = month,
+             y = n)) +
+  geom_bar(aes(fill = type), position = "dodge", stat = "identity") +
+  ggtitle("Clustered hotspot vs training for 2017-2018")
+```
+- training dataset has more obs (significant differences). 
+- in March, the hotspot has more observations. 
+- numbers are not consistent
+- most obs comes from month 1-3
+- whats weird: the number of fires on 10-12 in the hotspot data are so little.
+
+```{r}
+# comparing distribution without clustering
+hotspots2018 <- hotspots %>%
+  filter(year == 2018) %>%
+  select(lon, lat, year, month) %>%
+  mutate(type = "hotspot")
+hotspots2018
+
+# converting to factor
+hotspots2018$year <- as.factor(hotspots2018$year)
+hotspots2018$month <- as.factor(hotspots2018$month)
+
+joined2018_2 <- training_2018_selected %>%
+  bind_rows(hotspots2018)
+```
+
+```{r}
+#comparing distribution
+joined2018_2 %>%
+  count(month, type) %>%
+  group_by(type) %>%
+  ggplot(aes(x = month,
+             y = n)) +
+  geom_bar(aes(fill = type), position = "dodge", stat = "identity") +
+  ggtitle("Comparison without clustering 2018")
+```
+- there are still differences in the numbers where there are more hotspot data except for November. 
+- most obs comes from month 1-3
+- significant amount of observations in March for hotspot data. 
+- more obs from hotspot data
+
+
+### comparing 2016-2018 (MEANING: 2016-2017)
+
+```{r}
+training2016 <- training2016 %>%
+  mutate(period = "2016-2017")
+
+training2017 <- training2017 %>%
+  mutate(period = "2017-2018")
+
+hotspot2016 <- hotspot2016 %>%
+  mutate(period = "2016-2017")
+
+hotspot2017 <- hotspot2017 %>%
+  mutate(period = "2017-2018")
+
+training2016_2017 <- training2016 %>%
+  bind_rows(training2017) %>%
+  select(lon, lat, year, month, period) %>%
+  mutate(type = "training")
+
+hotspot2016_2017 <- hotspot2016 %>%
+  bind_rows(hotspot2017) %>%
+  mutate(type = "hotspot")
+
+# converting to factor
+hotspot2016_2017$year <- as.factor(hotspot2016_2017$year)
+hotspot2016_2017$month <- as.factor(hotspot2016_2017$month)
+
+joined_all <- training2016_2017 %>%
+  bind_rows(hotspot2016_2017)
+```
+
+```{r}
+#comparing distribution
+joined_all %>%
+  count(month,year, type, period) %>%
+  group_by(type, year, period) %>%
+  ggplot(aes(x = month,
+             y = n)) +
+  geom_bar(aes(fill = type), position = "dodge", stat = "identity") +
+  ggtitle("Comparison with clustering") +
+  facet_grid(~period) +
+  ylab("Number of fires")
+```
+- significant hotspot data in jan and march 2017 (check whats happening)
+- overall, there are more training data except for some times
+- most of the hotspot data are from month 1-3
+- numbers are not consistent between years
+
+
+```{r}
+# comparing distribution without clustering
+hotspots2 <- hotspots %>%
+  select(lon, lat, year, month) %>%
+  mutate(type = "hotspot")
+
+# converting to factor
+hotspots2$year <- as.factor(hotspots2$year)
+hotspots2$month <- as.factor(hotspots2$month)
+
+joined_all2 <- training_selected %>%
+  bind_rows(hotspots2)
+```
+
+```{r}
+#comparing distribution
+joined_all2 %>%
+  count(month, year, type) %>%
+  group_by(type, year) %>%
+  ggplot(aes(x = month,
+             y = n)) +
+  geom_bar(aes(fill = type), position = "dodge", stat = "identity") +
+  ggtitle("Comparison without clustering") +
+  facet_grid(~year)
+```
+- there are significant differences in hotspot and training
+- higher obs in march for hotspot data
+- different years have different counts
+
+
+### comparing the proportions
+
+all data: trainign_selected, hotspots_cl2
+2018: training_2018_selected, hotspots_cl_2018
+
+df1
+
+#### 2017-2018 (2017)
+```{r}
+# traaining data
+training2017_2 <- training2017
+coordinates(training2017_2) = c("lon", "lat")
+
+x1 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+x1[] <- 0
+
+tab1 <- table(cellFromXY(x1, training2017_2))
+
+x1[as.numeric(names(tab1))] <- tab1
+```
+
+total in training2017 = 947
+
+```{r}
+# creating proportions
+df1 <- data.frame(coordinates(x1), count = x1[])
+df1 <- df1 %>% 
+  mutate(prop2017 = count/947)  %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# clustered hotspot data
+hotspot2017_2 <- hotspot2017
+coordinates(hotspot2017_2) <- c("lon", "lat")
+
+xh_2017 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xh_2017[] <- 0
+
+tabh_2017 <- table(cellFromXY(xh_2017, hotspot2017_2))
+
+xh_2017[as.numeric(names(tabh_2017))] <- tabh_2017
+```
+
+```{r}
+# creating proportions
+dfh_2017 <- data.frame(coordinates(xh_2017), count = xh_2017[])
+dfh_2017 <- dfh_2017 %>% 
+  mutate(prop_h2017 = count/488)  %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# with clustering
+plot(x1)
+points(training2017, pch = 20)
+
+plot(xh_2017)
+points(hotspot2017_2, pch = 20)
+```
+very different.
+
+
+```{r}
+#creating scatter plot
+df_joined_2017 <- df1 %>%
+  left_join(dfh_2017, by = c("x", "y")) %>%
+  mutate(diff = prop2017 - prop_h2017,
+         id = 1:264) 
+
+df_joined_2017 %>%
+  group_by(x, y) %>%
+  ggplot(aes(x = prop2017,
+             y = prop_h2017,
+             label = id)) +
+  geom_text() +
+  ggtitle("Proportions of hotspot vs training 2017")
+ggplotly()
+```
+- There are some differences
+
+```{r}
+df1
+```
+
+
+cell 211: 146.0	-37.8	
+
+
+```{r}
+df_joined_2017 %>%
+  ggplot(aes(x = id,
+             y = diff)) +
+  geom_point() +
+  ggtitle("Diff in proportions 2017-2018")
+```
+
+### 2016
+```{r}
+# training data
+training2016_2 <- training2016
+coordinates(training2016_2) = c("lon", "lat")
+
+x2 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+x2[] <- 0
+
+tab2 <- table(cellFromXY(x2, training2016_2))
+
+x2[as.numeric(names(tab2))] <- tab2
+
+# creating proportions
+df2 <- data.frame(coordinates(x2), count = x2[])
+df2 <- df2 %>% 
+  mutate(prop2016 = count/648)  %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# clustered hotspot data
+hotspot2016_2 <- hotspot2016
+coordinates(hotspot2016_2) <- c("lon", "lat")
+
+xh_2016 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xh_2016[] <- 0
+
+tabh_2016 <- table(cellFromXY(xh_2016, hotspot2016_2))
+
+xh_2016[as.numeric(names(tabh_2016))] <- tabh_2016
+```
+
+```{r}
+# creating proportions
+dfh_2016 <- data.frame(coordinates(xh_2016), count = xh_2016[])
+dfh_2016 <- dfh_2016 %>% 
+  mutate(prop_h2016 = count/910)  %>%
+  dplyr::select(-count)
+```
+
+```{r}
+#plot comparison
+plot(x2)
+points(training2016, pch = 20)
+
+plot(xh_2016)
+points(hotspot2016_2, pch = 20)
+```
+
+```{r}
+#creating scatter plot
+df_joined_2016 <- df2 %>%
+  left_join(dfh_2016, by = c("x", "y")) %>%
+  mutate(diff = prop2016 - prop_h2016,
+         id = 1:264) 
+
+df_joined_2016 %>%
+  group_by(x, y) %>%
+  ggplot(aes(x = prop2016,
+             y = prop_h2016,
+             label = id)) +
+  geom_text() +
+  ggtitle("Proportions 2016-2017")
+ggplotly()
+```
+a lot of differences?
+
+
+```{r}
+df_joined_2016 %>%
+  ggplot(aes(x = id,
+             y = diff)) +
+  geom_point() +
+  ggtitle("Prop differences 2016-2017")
+```
+
+
+### monthly (only for 2017-2018 tho)
+#### with clustering
+- want the proportions per month for each cell id
+```{r}
+# counting total fires per month
+# training 
+training2017_count <- training2017 %>%
+  count(month)
+
+# hotspot 
+hotspot2017_count <- hotspot2017 %>%
+  count(month)
+```
+
+```{r}
+training2017_count
+```
+
+```{r}
+hotspot2017_count
+```
+
+#### training-january 
+```{r}
+training_2017_jan <- training2017 %>%
+  filter(month == 1)
+
+coordinates(training_2017_jan) = c("lon", "lat")
+
+xtjan <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xtjan[] <- 0
+
+tab_tjan <- table(cellFromXY(xtjan, training_2017_jan))
+
+xtjan[as.numeric(names(tab_tjan))] <- tab_tjan
+
+df_tjan <- data.frame(coordinates(xtjan), count = xtjan[])
+df_tjan <- df_tjan %>% 
+  mutate(jan = count/325) %>%
+  dplyr::select(-count)
+```
+
+#### training-february
+```{r}
+training_2017_feb <- training2017 %>%
+  filter(month == 2)
+
+coordinates(training_2017_feb) = c("lon", "lat")
+
+xtfeb <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xtfeb[] <- 0
+
+tab_tfeb <- table(cellFromXY(xtfeb, training_2017_feb))
+
+xtfeb[as.numeric(names(tab_tfeb))] <- tab_tfeb
+
+df_tfeb <- data.frame(coordinates(xtfeb), count = xtfeb[])
+df_tfeb <- df_tfeb %>% 
+  mutate(feb = count/65) %>%
+  dplyr::select(-count)
+```
+
+#### training-march
+```{r}
+training_2017_mar <- training2017 %>%
+  filter(month == 3)
+
+coordinates(training_2017_mar) = c("lon", "lat")
+
+xtmar <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xtmar[] <- 0
+
+tab_tmar <- table(cellFromXY(xtmar, training_2017_mar))
+
+xtmar[as.numeric(names(tab_tmar))] <- tab_tmar
+
+df_tmar <- data.frame(coordinates(xtmar), count = xtmar[])
+df_tmar <- df_tmar %>% 
+  mutate(mar = count/206) %>%
+  dplyr::select(-count)
+```
+
+#### training-oct
+```{r}
+training_2017_oct <- training2017 %>%
+  filter(month == 10)
+
+coordinates(training_2017_oct) = c("lon", "lat")
+
+xtoct<- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xtoct[] <- 0
+
+tab_toct <- table(cellFromXY(xtoct, training_2017_oct))
+
+xtoct[as.numeric(names(tab_toct))] <- tab_toct
+
+df_toct <- data.frame(coordinates(xtoct), count = xtoct[])
+df_toct <- df_toct %>% 
+  mutate(oct = count/45) %>%
+  dplyr::select(-count)
+```
+
+#### training-november
+```{r}
+training_2017_nov <- training2017 %>%
+  filter(month == 11)
+
+coordinates(training_2017_nov) = c("lon", "lat")
+
+xtnov <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xtnov[] <- 0
+
+tab_tnov <- table(cellFromXY(xtnov, training_2017_nov))
+
+xtnov[as.numeric(names(tab_tnov))] <- tab_tnov
+
+df_tnov <- data.frame(coordinates(xtnov), count = xtnov[])
+df_tnov <- df_tnov %>% 
+  mutate(nov = count/205) %>%
+  dplyr::select(-count)
+```
+
+#### training-december
+```{r}
+training_2017_dec <- training2017 %>%
+  filter(month == 12)
+
+coordinates(training_2017_dec) = c("lon", "lat")
+
+xtdec <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xtdec[] <- 0
+
+tab_tdec <- table(cellFromXY(xtdec, training_2017_dec))
+
+xtdec[as.numeric(names(tab_tdec))] <- tab_tdec
+
+df_tdec<- data.frame(coordinates(xtdec), count = xtdec[])
+df_tdec <- df_tdec %>% 
+  mutate(dec = count/101) %>%
+  dplyr::select(-count)
+```
+
+#### hotspot-january 
+```{r}
+hotspots_2017_jan <- hotspot2017 %>%
+  filter(month == 1)
+
+coordinates(hotspots_2017_jan) = c("lon", "lat")
+
+xhjan <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhjan[] <- 0
+
+tab_hjan <- table(cellFromXY(xhjan, hotspots_2017_jan))
+
+xhjan[as.numeric(names(tab_hjan))] <- tab_hjan
+
+df_hjan <- data.frame(coordinates(xhjan), count = xhjan[])
+df_hjan <- df_hjan %>% 
+  mutate(jan = count/132) %>%
+  dplyr::select(-count)
+```
+
+#### hotspot-february
+```{r}
+hotspots_2017_feb <- hotspot2017 %>%
+  filter(month == 2)
+
+coordinates(hotspots_2017_feb) = c("lon", "lat")
+
+xhfeb <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhfeb[] <- 0
+
+tab_hfeb <- table(cellFromXY(xhfeb, hotspots_2017_feb))
+
+xhfeb[as.numeric(names(tab_hfeb))] <- tab_hfeb
+
+df_hfeb <- data.frame(coordinates(xhfeb), count = xhfeb[])
+df_hfeb <- df_hfeb %>% 
+  mutate(feb = count/51) %>%
+  dplyr::select(-count)
+```
+
+#### hotspot-march
+```{r}
+hotspots_2017_mar <- hotspot2017 %>%
+  filter(month == 3)
+
+coordinates(hotspots_2017_mar) = c("lon", "lat")
+
+xhmar <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhmar[] <- 0
+
+tab_hmar <- table(cellFromXY(xhmar, hotspots_2017_mar))
+
+xhmar[as.numeric(names(tab_hmar))] <- tab_hmar
+
+df_hmar <- data.frame(coordinates(xhmar), count = xhmar[])
+df_hmar <- df_hmar %>% 
+  mutate(mar = count/233) %>%
+  dplyr::select(-count)
+```
+
+#### hotspot-oct
+```{r}
+hotspots_2017_oct <- hotspot2017 %>%
+  filter(month == 10)
+
+coordinates(hotspots_2017_oct) = c("lon", "lat")
+
+xhoct <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhoct[] <- 0
+
+tab_hoct <- table(cellFromXY(xhoct, hotspots_2017_oct))
+
+xhoct[as.numeric(names(tab_hoct))] <- tab_hoct
+
+df_hoct <- data.frame(coordinates(xhoct), count = xhoct[])
+df_hoct <- df_hoct %>% 
+  mutate(oct = count/33) %>%
+  dplyr::select(-count)
+```
+
+#### hotspot-nov
+```{r}
+hotspots_2017_nov <- hotspot2017 %>%
+  filter(month == 11)
+
+coordinates(hotspots_2017_nov) = c("lon", "lat")
+
+xhnov <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhnov[] <- 0
+
+tab_hnov <- table(cellFromXY(xhnov, hotspots_2017_nov))
+
+xhnov[as.numeric(names(tab_hnov))] <- tab_hnov
+
+df_hnov <- data.frame(coordinates(xhnov), count = xhnov[])
+df_hnov <- df_hnov %>% 
+  mutate(nov = count/22) %>%
+  dplyr::select(-count)
+```
+
+#### hotspot-dec
+```{r}
+hotspots_2017_dec <- hotspot2017 %>%
+  filter(month == 12)
+
+coordinates(hotspots_2017_dec) = c("lon", "lat")
+
+xhdec <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhdec[] <- 0
+
+tab_hdec <- table(cellFromXY(xhdec, hotspots_2017_dec))
+
+xhdec[as.numeric(names(tab_hdec))] <- tab_hdec
+
+df_hdec <- data.frame(coordinates(xhdec), count = xhdec[])
+df_hdec <- df_hdec %>% 
+  mutate(dec = count/17) %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# joining the training data
+df_tjan2 <- df_tjan %>% mutate(id = 1:264) %>%  select(id, jan)
+df_tfeb2 <- df_tfeb %>% mutate(id = 1:264) %>% select(-x, -y)
+df_tmar2 <- df_tmar %>% mutate(id = 1:264) %>% select(-x, -y)
+df_toct2 <- df_toct %>% mutate(id = 1:264) %>% select(-x, -y)
+df_tnov2 <- df_tnov %>% mutate(id = 1:264) %>% select(-x, -y)
+df_tdec2 <- df_tdec %>% mutate(id = 1:264) %>% select(-x, -y)
+
+training_joined <- df_tjan2 %>% left_join(df_tfeb2, by = "id")
+training_joined <- training_joined %>% left_join(df_tmar2, by = "id")
+training_joined <- training_joined %>% left_join(df_toct2, by = "id")
+training_joined <- training_joined %>% left_join(df_tnov2, by = "id")
+training_joined <- training_joined %>% left_join(df_tdec2, by = "id")
+
+# joining the hotspot data
+df_hjan2018 <- df_hjan %>% mutate(id = 1:264) %>%  select(id, jan)
+df_hfeb2018 <- df_hfeb %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hmar2018 <- df_hmar %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hoct2018 <- df_hoct %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hnov2018 <- df_hnov %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hdec2018 <- df_hdec %>% mutate(id = 1:264) %>% select(-x, -y)
+
+hotspot_joined <- df_hjan2018 %>% left_join(df_hfeb2018, by = "id")
+hotspot_joined <- hotspot_joined %>% left_join(df_hmar2018, by = "id")
+hotspot_joined <- hotspot_joined %>% left_join(df_hoct2018, by = "id")
+hotspot_joined <- hotspot_joined %>% left_join(df_hnov2018, by = "id")
+hotspot_joined <- hotspot_joined %>% left_join(df_hdec2018, by = "id")
+```
+
+```{r}
+library(tidyverse)
+# creating boxplot for training
+training_long <- training_joined %>%
+  pivot_longer(2:7, names_to = "month", values_to = "values")
+
+training_long %>%
+  group_by(id) %>%
+  ggplot(aes(x = id,
+             y = values,
+             group = id)) +
+  geom_boxplot() +
+  ggtitle("Training")
+ggplotly()
+```
+- some cells have outliers --> the proportions of fire are not consistent over the year.
+
+```{r}
+# creating boxplot for hotspot
+hotspot_long <- hotspot_joined %>%
+  pivot_longer(2:7, names_to = "month", values_to = "values")
+
+hotspot_long %>%
+  group_by(id) %>%
+  ggplot(aes(x = id,
+             y = values,
+             group = id)) +
+  geom_boxplot() +
+  ggtitle("Hotspot")
+ggplotly()
+```
+- same conclusion
+
+--> another thing that we can do:
+
+### dotplot of the diff in proportions but faceted by month.
+
+```{r}
+long_joined <- training_long %>%
+  left_join(hotspot_long, by = c("id", "month")) %>%
+  mutate(diff = values.x - values.y)
+long_joined %>%
+  ggplot(aes(x = id, y = diff)) +
+  geom_point() +
+  facet_grid(~ month)
+```
+
+some differences in the proportions.
+
+## create a map 
+
+-- we know that the proportions per month are different. so we wanna see if the proportions per month differ for the 3 years --- 
+--- but the difference in proportions per month are also different--- 
+--map per month to see the proportions--
+```{r}
+df_tjan <- df_tjan %>% mutate(id = 1:264)
+df_tjan
+```
+
+```{r}
+diff_df <- long_joined %>%
+  select(id, month, diff) %>%
+  left_join(df_tjan, by = "id") %>%
+  select(id, x, y, month, diff)
+
+#diff_df <- diff_df %>%
+ # sf::st_as_sf(coords = c("x", "y"))
+
+vic_raster <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.6, 
+            crs = "+proj=longlat +datum=WGS84")
+
+diff_df
+```
+
+## january (2018)
+```{r}
+diff_df_jan <- diff_df %>%
+  filter(month == "jan") %>%
+  select(-month, -id)
+
+coordinates(diff_df_jan) = c("x", "y")
+```
+
+```{r}
+diff_df_jan_raster <- rasterFromXYZ(diff_df_jan)
+```
+
+```{r}
+au_map <- ne_states(country = 'Australia', returnclass = 'sf')
+vic_map <- au_map[7,]
+
+vic_map_sf <- vic_map %>%
+  st_as_sf(coords = c("lon", "lat"))
+```
+
+```{r}
+library(tmap)
+tm_shape(diff_df_jan_raster$diff) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+diff = training - hotspot --> negative indicates more hotspot & positive indicates more training
+
+
+## february
+```{r}
+diff_df_feb <- diff_df %>%
+  filter(month == "feb") %>%
+  select(-month, -id)
+
+coordinates(diff_df_feb) = c("x", "y")
+```
+
+```{r}
+diff_df_feb_raster <- rasterFromXYZ(diff_df_feb)
+```
+
+```{r}
+tm_shape(diff_df_feb_raster$diff) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## march
+```{r}
+diff_df_mar <- diff_df %>%
+  filter(month == "mar") %>%
+  select(-month, -id)
+
+coordinates(diff_df_mar) = c("x", "y")
+```
+
+```{r}
+diff_df_mar_raster <- rasterFromXYZ(diff_df_mar)
+```
+
+```{r}
+tm_shape(diff_df_mar_raster$diff) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## oct
+```{r}
+diff_df_oct <- diff_df %>%
+  filter(month == "oct") %>%
+  select(-month, -id)
+
+coordinates(diff_df_oct) = c("x", "y")
+```
+
+```{r}
+diff_df_oct_raster <- rasterFromXYZ(diff_df_oct)
+```
+
+```{r}
+tm_shape(diff_df_oct_raster$diff) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## nov
+```{r}
+diff_df_nov <- diff_df %>%
+  filter(month == "nov") %>%
+  select(-month, -id)
+
+coordinates(diff_df_nov) = c("x", "y")
+```
+
+```{r}
+diff_df_nov_raster <- rasterFromXYZ(diff_df_nov)
+```
+
+```{r}
+tm_shape(diff_df_nov_raster$diff) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+## dec
+```{r}
+diff_df_dec <- diff_df %>%
+  filter(month == "dec") %>%
+  select(-month, -id)
+
+coordinates(diff_df_dec) = c("x", "y")
+```
+
+```{r}
+diff_df_dec_raster <- rasterFromXYZ(diff_df_dec)
+```
+
+```{r}
+tm_shape(diff_df_dec_raster$diff) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+
+## also compare the hotspots data each year (monthly proportions)
+--using boxplot? dotplot?
+
+2020:
+###jan-2021
+```{r}
+hotspots_2020_jan <- hotspot2020 %>%
+  filter(month == 1)
+
+coordinates(hotspots_2020_jan) = c("lon", "lat")
+
+xhjan2 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhjan2[] <- 0
+
+tab_hjan2 <- table(cellFromXY(xhjan2, hotspots_2020_jan))
+
+xhjan2[as.numeric(names(tab_hjan2))] <- tab_hjan2
+
+df_hjan2 <- data.frame(coordinates(xhjan2), count = xhjan2[])
+df_hjan2 <- df_hjan2 %>% 
+  mutate(jan = count/139) %>%
+  dplyr::select(-count)
+```
+
+###feb-2021
+```{r}
+hotspots_2020_feb <- hotspot2020 %>%
+  filter(month == 2)
+
+coordinates(hotspots_2020_feb) = c("lon", "lat")
+
+xhfeb2 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhfeb2[] <- 0
+
+tab_hfeb2 <- table(cellFromXY(xhfeb2, hotspots_2020_feb))
+
+xhfeb2[as.numeric(names(tab_hfeb2))] <- tab_hfeb2
+
+df_hfeb2 <- data.frame(coordinates(xhfeb2), count = xhfeb2[])
+df_hfeb2 <- df_hfeb2 %>% 
+  mutate(feb = count/52) %>%
+  dplyr::select(-count)
+```
+
+###mar-2021
+```{r}
+hotspots_2020_mar <- hotspot2020 %>%
+  filter(month == 3)
+
+coordinates(hotspots_2020_mar) = c("lon", "lat")
+
+xhmar2 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhmar2[] <- 0
+
+tab_hmar2 <- table(cellFromXY(xhmar2, hotspots_2020_mar))
+
+xhmar2[as.numeric(names(tab_hmar2))] <- tab_hmar2
+
+df_hmar2 <- data.frame(coordinates(xhmar2), count = xhmar2[])
+df_hmar2 <- df_hmar2 %>% 
+  mutate(mar = count/389) %>%
+  dplyr::select(-count)
+```
+
+###oct-2020
+```{r}
+hotspots_2020_oct <- hotspot2020 %>%
+  filter(month == 10)
+
+coordinates(hotspots_2020_oct) = c("lon", "lat")
+
+xhoct2 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhoct2[] <- 0
+
+tab_hoct2 <- table(cellFromXY(xhoct2, hotspots_2020_oct))
+
+xhoct2[as.numeric(names(tab_hoct2))] <- tab_hoct2
+
+df_hoct2 <- data.frame(coordinates(xhoct2), count = xhoct2[])
+df_hoct2 <- df_hoct2 %>% 
+  mutate(oct = count/8) %>%
+  dplyr::select(-count)
+```
+
+###nov-2020
+```{r}
+hotspots_2020_nov <- hotspot2020 %>%
+  filter(month == 11)
+
+coordinates(hotspots_2020_nov) = c("lon", "lat")
+
+xhnov2 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhnov2[] <- 0
+
+tab_hnov2 <- table(cellFromXY(xhnov2, hotspots_2020_nov))
+
+xhnov2[as.numeric(names(tab_hnov2))] <- tab_hnov2
+
+df_hnov2 <- data.frame(coordinates(xhnov2), count = xhnov2[])
+df_hnov2 <- df_hnov2 %>% 
+  mutate(nov = count/47) %>%
+  dplyr::select(-count)
+```
+
+###dec-2020
+```{r}
+hotspots_2020_dec <- hotspot2020 %>%
+  filter(month == 12)
+
+coordinates(hotspots_2020_dec) = c("lon", "lat")
+
+xhdec2 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhdec2[] <- 0
+
+tab_hdec2 <- table(cellFromXY(xhdec2, hotspots_2020_dec))
+
+xhdec2[as.numeric(names(tab_hdec2))] <- tab_hdec2
+
+df_hdec2 <- data.frame(coordinates(xhdec2), count = xhdec2[])
+df_hdec2 <- df_hdec2 %>% 
+  mutate(dec = count/27) %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# joining the 2017 hotspot data
+df_hjan2020 <- df_hjan2 %>% mutate(id = 1:264) %>%  select(id, jan)
+df_hfeb2020 <- df_hfeb2 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hmar2020 <- df_hmar2 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hoct2020 <- df_hoct2 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hnov2020 <- df_hnov2 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hdec2020 <- df_hdec2 %>% mutate(id = 1:264) %>% select(-x, -y)
+
+hotspot_joined_2020 <- df_hjan2020 %>% left_join(df_hfeb2020, by = "id")
+hotspot_joined_2020 <- hotspot_joined_2020 %>% left_join(df_hmar2020, by = "id")
+hotspot_joined_2020 <- hotspot_joined_2020 %>% left_join(df_hoct2020, by = "id")
+hotspot_joined_2020 <- hotspot_joined_2020 %>% left_join(df_hnov2020, by = "id")
+hotspot_joined_2020 <- hotspot_joined_2020 %>% left_join(df_hdec2020, by = "id")
+```
+
+```{r}
+hotspot_long2020 <- hotspot_joined_2020 %>%
+  pivot_longer(2:7, names_to = "month", values_to = "values") %>%
+  mutate(period = "2020-2021")
+```
+
+2019:
+###jan-2020
+```{r}
+hotspots_2019_jan <- hotspot2019 %>%
+  filter(month == 1)
+
+coordinates(hotspots_2019_jan) = c("lon", "lat")
+
+xhjan3 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhjan3[] <- 0
+
+tab_hjan3 <- table(cellFromXY(xhjan3, hotspots_2019_jan))
+
+xhjan3[as.numeric(names(tab_hjan3))] <- tab_hjan3
+
+df_hjan3 <- data.frame(coordinates(xhjan3), count = xhjan3[])
+df_hjan3 <- df_hjan3 %>% 
+  mutate(jan = count/270) %>%
+  dplyr::select(-count)
+```
+
+###feb-2020
+```{r}
+hotspots_2019_feb <- hotspot2019 %>%
+  filter(month == 2)
+
+coordinates(hotspots_2019_feb) = c("lon", "lat")
+
+xhfeb3 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhfeb3[] <- 0
+
+tab_hfeb3 <- table(cellFromXY(xhfeb3, hotspots_2019_feb))
+
+xhfeb3[as.numeric(names(tab_hfeb3))] <- tab_hfeb3
+
+df_hfeb3 <- data.frame(coordinates(xhfeb3), count = xhfeb3[])
+df_hfeb3 <- df_hfeb3 %>% 
+  mutate(feb = count/21) %>%
+  dplyr::select(-count)
+```
+
+###mar-2020
+```{r}
+hotspots_2019_mar <- hotspot2019 %>%
+  filter(month == 3)
+
+coordinates(hotspots_2019_mar) = c("lon", "lat")
+
+xhmar3 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhmar3[] <- 0
+
+tab_hmar3 <- table(cellFromXY(xhmar3, hotspots_2019_mar))
+
+xhmar3[as.numeric(names(tab_hmar3))] <- tab_hmar3
+
+df_hmar3 <- data.frame(coordinates(xhmar3), count = xhmar3[])
+df_hmar3 <- df_hmar3 %>% 
+  mutate(mar = count/243) %>%
+  dplyr::select(-count)
+```
+
+###oct-2019
+```{r}
+hotspots_2019_oct <- hotspot2019 %>%
+  filter(month == 10)
+
+coordinates(hotspots_2019_oct) = c("lon", "lat")
+
+xhoct3 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhoct3[] <- 0
+
+tab_hoct3 <- table(cellFromXY(xhoct3, hotspots_2019_oct))
+
+xhoct3[as.numeric(names(tab_hoct3))] <- tab_hoct3
+
+df_hoct3 <- data.frame(coordinates(xhoct3), count = xhoct3[])
+df_hoct3 <- df_hoct3 %>% 
+  mutate(oct = count/30) %>%
+  dplyr::select(-count)
+```
+
+###nov-2019
+```{r}
+hotspots_2019_nov <- hotspot2019 %>%
+  filter(month == 11)
+
+coordinates(hotspots_2019_nov) = c("lon", "lat")
+
+xhnov3 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhnov3[] <- 0
+
+tab_hnov3 <- table(cellFromXY(xhnov3, hotspots_2019_nov))
+
+xhnov3[as.numeric(names(tab_hnov3))] <- tab_hnov3
+
+df_hnov3 <- data.frame(coordinates(xhnov3), count = xhnov3[])
+df_hnov3 <- df_hnov3 %>% 
+  mutate(nov = count/66) %>%
+  dplyr::select(-count)
+```
+
+###dec-2019
+```{r}
+hotspots_2019_dec <- hotspot2019 %>%
+  filter(month == 12)
+
+coordinates(hotspots_2019_dec) = c("lon", "lat")
+
+xhdec3 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhdec3[] <- 0
+
+tab_hdec3 <- table(cellFromXY(xhdec3, hotspots_2019_dec))
+
+xhdec3[as.numeric(names(tab_hdec3))] <- tab_hdec3
+
+df_hdec3 <- data.frame(coordinates(xhdec3), count = xhdec3[])
+df_hdec3 <- df_hdec3 %>% 
+  mutate(dec = count/278) %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# joining the 2019 hotspot data
+df_hjan2019 <- df_hjan3 %>% mutate(id = 1:264) %>%  select(id, jan)
+df_hfeb2019 <- df_hfeb3 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hmar2019 <- df_hmar3 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hoct2019 <- df_hoct3 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hnov2019 <- df_hnov3 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hdec2019 <- df_hdec3 %>% mutate(id = 1:264) %>% select(-x, -y)
+
+hotspot_joined_2019 <- df_hjan2019 %>% left_join(df_hfeb2019, by = "id")
+hotspot_joined_2019 <- hotspot_joined_2019 %>% left_join(df_hmar2019, by = "id")
+hotspot_joined_2019 <- hotspot_joined_2019 %>% left_join(df_hoct2019, by = "id")
+hotspot_joined_2019 <- hotspot_joined_2019 %>% left_join(df_hnov2019, by = "id")
+hotspot_joined_2019 <- hotspot_joined_2019 %>% left_join(df_hdec2019, by = "id")
+```
+
+```{r}
+hotspot_long2019 <- hotspot_joined_2019 %>%
+  pivot_longer(2:7, names_to = "month", values_to = "values") %>%
+  mutate(period = "2019-2020")
+```
+
+
+2018:
+###jan-2019
+```{r}
+hotspots_2018_jan <- hotspot2018 %>%
+  filter(month == 1)
+
+coordinates(hotspots_2018_jan) = c("lon", "lat")
+
+xhjan4 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhjan4[] <- 0
+
+tab_hjan4 <- table(cellFromXY(xhjan4, hotspots_2018_jan))
+
+xhjan4[as.numeric(names(tab_hjan4))] <- tab_hjan4
+
+df_hjan4 <- data.frame(coordinates(xhjan4), count = xhjan4[])
+df_hjan4 <- df_hjan4 %>% 
+  mutate(jan = count/280) %>%
+  dplyr::select(-count)
+```
+
+###feb-2019
+```{r}
+hotspots_2018_feb <- hotspot2018 %>%
+  filter(month == 2)
+
+coordinates(hotspots_2018_feb) = c("lon", "lat")
+
+xhfeb4 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhfeb4[] <- 0
+
+tab_hfeb4 <- table(cellFromXY(xhfeb4, hotspots_2018_feb))
+
+xhfeb4[as.numeric(names(tab_hfeb4))] <- tab_hfeb4
+
+df_hfeb4 <- data.frame(coordinates(xhfeb4), count = xhfeb4[])
+df_hfeb4 <- df_hfeb4 %>% 
+  mutate(feb = count/28) %>%
+  dplyr::select(-count)
+```
+
+###mar-2019
+```{r}
+hotspots_2018_mar <- hotspot2018 %>%
+  filter(month == 3)
+
+coordinates(hotspots_2018_mar) = c("lon", "lat")
+
+xhmar4 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhmar4[] <- 0
+
+tab_hmar4 <- table(cellFromXY(xhmar4, hotspots_2018_mar))
+
+xhmar4[as.numeric(names(tab_hmar4))] <- tab_hmar4
+
+df_hmar4 <- data.frame(coordinates(xhmar4), count = xhmar4[])
+df_hmar4 <- df_hmar4 %>% 
+  mutate(mar = count/134) %>%
+  dplyr::select(-count)
+```
+
+###oct-2018
+```{r}
+hotspots_2018_oct <- hotspot2018 %>%
+  filter(month == 10)
+
+coordinates(hotspots_2018_oct) = c("lon", "lat")
+
+xhoct4 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhoct4[] <- 0
+
+tab_hoct4 <- table(cellFromXY(xhoct4, hotspots_2018_oct))
+
+xhoct4[as.numeric(names(tab_hoct4))] <- tab_hoct4
+
+df_hoct4 <- data.frame(coordinates(xhoct4), count = xhoct4[])
+df_hoct4 <- df_hoct4 %>% 
+  mutate(oct = count/23) %>%
+  dplyr::select(-count)
+```
+
+###nov-2018
+```{r}
+hotspots_2018_nov <- hotspot2018 %>%
+  filter(month == 11)
+
+coordinates(hotspots_2018_nov) = c("lon", "lat")
+
+xhnov4 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhnov4[] <- 0
+
+tab_hnov4 <- table(cellFromXY(xhnov4, hotspots_2018_nov))
+
+xhnov4[as.numeric(names(tab_hnov4))] <- tab_hnov4
+
+df_hnov4 <- data.frame(coordinates(xhnov4), count = xhnov4[])
+df_hnov4 <- df_hnov4 %>% 
+  mutate(nov = count/6) %>%
+  dplyr::select(-count)
+```
+
+###dec-2018
+```{r}
+hotspots_2018_dec <- hotspot2018 %>%
+  filter(month == 12)
+
+coordinates(hotspots_2018_dec) = c("lon", "lat")
+
+xhdec4 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhdec4[] <- 0
+
+tab_hdec4 <- table(cellFromXY(xhdec4, hotspots_2018_dec))
+
+xhdec4[as.numeric(names(tab_hdec4))] <- tab_hdec4
+
+df_hdec4 <- data.frame(coordinates(xhdec4), count = xhdec4[])
+df_hdec4 <- df_hdec4 %>% 
+  mutate(dec = count/38) %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# joining the 2019 hotspot data
+df_hjan2018 <- df_hjan4 %>% mutate(id = 1:264) %>%  select(id, jan)
+df_hfeb2018 <- df_hfeb4 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hmar2018 <- df_hmar4 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hoct2018 <- df_hoct4 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hnov2018 <- df_hnov4 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hdec2018 <- df_hdec4 %>% mutate(id = 1:264) %>% select(-x, -y)
+
+hotspot_joined_2018 <- df_hjan2018 %>% left_join(df_hfeb2018, by = "id")
+hotspot_joined_2018 <- hotspot_joined_2018 %>% left_join(df_hmar2018, by = "id")
+hotspot_joined_2018 <- hotspot_joined_2018 %>% left_join(df_hoct2018, by = "id")
+hotspot_joined_2018 <- hotspot_joined_2018 %>% left_join(df_hnov2018, by = "id")
+hotspot_joined_2018 <- hotspot_joined_2018 %>% left_join(df_hdec2018, by = "id")
+```
+
+```{r}
+hotspot_long2018 <- hotspot_joined_2018 %>%
+  pivot_longer(2:7, names_to = "month", values_to = "values") %>%
+  mutate(period = "2018-2019")
+```
+
+2017: 
+```{r}
+hotspot_long2017 <- hotspot_long %>%
+  mutate(period = "2017-2018")
+```
+
+2016:
+###jan-2017
+```{r}
+hotspots_2016_jan <- hotspot2016 %>%
+  filter(month == 1)
+
+coordinates(hotspots_2016_jan) = c("lon", "lat")
+
+xhjan5 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhjan5[] <- 0
+
+tab_hjan5 <- table(cellFromXY(xhjan5, hotspots_2016_jan))
+
+xhjan5[as.numeric(names(tab_hjan5))] <- tab_hjan5
+
+df_hjan5 <- data.frame(coordinates(xhjan5), count = xhjan5[])
+df_hjan5 <- df_hjan5 %>% 
+  mutate(jan = count/375) %>%
+  dplyr::select(-count)
+```
+
+###feb-2017
+```{r}
+hotspots_2016_feb <- hotspot2016 %>%
+  filter(month == 2)
+
+coordinates(hotspots_2016_feb) = c("lon", "lat")
+
+xhfeb5 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhfeb5[] <- 0
+
+tab_hfeb5 <- table(cellFromXY(xhfeb5, hotspots_2016_feb))
+
+xhfeb5[as.numeric(names(tab_hfeb5))] <- tab_hfeb5
+
+df_hfeb5 <- data.frame(coordinates(xhfeb5), count = xhfeb5[])
+df_hfeb5 <- df_hfeb5 %>% 
+  mutate(feb = count/90) %>%
+  dplyr::select(-count)
+```
+
+###mar-2017
+```{r}
+hotspots_2016_mar <- hotspot2016 %>%
+  filter(month == 3)
+
+coordinates(hotspots_2016_mar) = c("lon", "lat")
+
+xhmar5 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhmar5[] <- 0
+
+tab_hmar5 <- table(cellFromXY(xhmar5, hotspots_2016_mar))
+
+xhmar5[as.numeric(names(tab_hmar5))] <- tab_hmar5
+
+df_hmar5 <- data.frame(coordinates(xhmar5), count = xhmar5[])
+df_hmar5 <- df_hmar5 %>% 
+  mutate(mar = count/358) %>%
+  dplyr::select(-count)
+```
+
+###oct-2016
+```{r}
+hotspots_2016_oct <- hotspot2016 %>%
+  filter(month == 10)
+
+coordinates(hotspots_2016_oct) = c("lon", "lat")
+
+xhoct5 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhoct5[] <- 0
+
+tab_hoct5 <- table(cellFromXY(xhoct5, hotspots_2016_oct))
+
+xhoct5[as.numeric(names(tab_hoct5))] <- tab_hoct5
+
+df_hoct5 <- data.frame(coordinates(xhoct5), count = xhoct5[])
+df_hoct5 <- df_hoct5 %>% 
+  mutate(oct = count/9) %>%
+  dplyr::select(-count)
+```
+
+###nov-2016
+```{r}
+hotspots_2016_nov <- hotspot2016 %>%
+  filter(month == 11)
+
+coordinates(hotspots_2016_nov) = c("lon", "lat")
+
+xhnov5 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhnov5[] <- 0
+
+tab_hnov5 <- table(cellFromXY(xhnov5, hotspots_2016_nov))
+
+xhnov5[as.numeric(names(tab_hnov5))] <- tab_hnov5
+
+df_hnov5 <- data.frame(coordinates(xhnov5), count = xhnov5[])
+df_hnov5 <- df_hnov5 %>% 
+  mutate(nov = count/41) %>%
+  dplyr::select(-count)
+```
+
+###dec-2016
+```{r}
+hotspots_2016_dec <- hotspot2016 %>%
+  filter(month == 12)
+
+coordinates(hotspots_2016_dec) = c("lon", "lat")
+
+xhdec5 <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xhdec5[] <- 0
+
+tab_hdec5 <- table(cellFromXY(xhdec5, hotspots_2016_dec))
+
+xhdec5[as.numeric(names(tab_hdec5))] <- tab_hdec5
+
+df_hdec5 <- data.frame(coordinates(xhdec5), count = xhdec5[])
+df_hdec5 <- df_hdec5 %>% 
+  mutate(dec = count/37) %>%
+  dplyr::select(-count)
+```
+
+```{r}
+# joining the 2019 hotspot data
+df_hjan2016 <- df_hjan5 %>% mutate(id = 1:264) %>%  select(id, jan)
+df_hfeb2016 <- df_hfeb5 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hmar2016 <- df_hmar5 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hoct2016 <- df_hoct5 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hnov2016 <- df_hnov5 %>% mutate(id = 1:264) %>% select(-x, -y)
+df_hdec2016 <- df_hdec5 %>% mutate(id = 1:264) %>% select(-x, -y)
+
+hotspot_joined_2016 <- df_hjan2016 %>% left_join(df_hfeb2016, by = "id")
+hotspot_joined_2016 <- hotspot_joined_2016 %>% left_join(df_hmar2016, by = "id")
+hotspot_joined_2016 <- hotspot_joined_2016 %>% left_join(df_hoct2016, by = "id")
+hotspot_joined_2016 <- hotspot_joined_2016 %>% left_join(df_hnov2016, by = "id")
+hotspot_joined_2016 <- hotspot_joined_2016 %>% left_join(df_hdec2016, by = "id")
+```
+
+```{r}
+hotspot_long2016 <- hotspot_joined_2016 %>%
+  pivot_longer(2:7, names_to = "month", values_to = "values") %>%
+  mutate(period = "2016-2017")
+```
+
+
+
+```{r}
+# joining all the years
+hotspots_long_joined <- hotspot_long2016 %>% bind_rows(hotspot_long2017) %>% bind_rows(hotspot_long2018) %>% bind_rows(hotspot_long2019) %>% bind_rows(hotspot_long2020)
+
+hotspots_long_joined$month <- factor(hotspots_long_joined$month, levels = c("oct", "nov", "dec", "jan", "feb", "mar"))
+
+hotspots_long_joined %>%
+  ggplot(aes(x = id, y = values)) +
+  geom_point() +
+  facet_grid(month ~ period)
+```
+- the proportions are pretty different per year.
+
+```{r}
+hotspots_long_joined %>% g
+  group_by(id, month) %>%
+  ggplot(aes(x = as.factor(id), y = values)) +
+  geom_boxplot() +
+  facet_wrap(~month,nrow=6)
+```
+
+# Conclusion 
+
+--move important plots and findings here--
+

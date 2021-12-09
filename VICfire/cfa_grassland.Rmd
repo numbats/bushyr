@@ -1,0 +1,74 @@
+---
+title: "ida"
+author: "Brenwin"
+date: "19/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# --- load library
+library(tidyverse)
+```
+
+# read CFA data 
+
+    data source:
+- https://discover.data.vic.gov.au/dataset/low-bushfire-rating-areas1
+
+    about data:
+- define areas of low fire hazard ratings
+- areas NOT covered by this layer; are rated as having high fire hazard rating (for purposes of Electiricty Safety Act 1998)
+    
+- CFA; assign low/high fire ratings; to land areas
+  - required by law (Electricity Safety Act 1998)
+  - used in conjunction with Electricity Safety (Bushfire Mitigation) Regulations 2013; to prescribe low/high bushfire risk areas 
+
+
+    low/high fire hazard rating areas
+Low fire hazard rating area
+- usually restricted to irrigated areas & towns; where block sizes are small & well maintained
+  - e.g. high density residential areas// industrial & commercial urban areas// high moisture crops (e.g. market gardens)// irrrigated farmland// vineyards// golf courses// sporting ovas
+  
+High fire hazard rating area
+- areas; not covered by low hazard rating areas
+- areas; said to contain sufficient fuel on ground; to carry a fire
+
+Hazardous bushfire risk area (HBRA): area assigned a fire hazard rating of "high"
+Low bushfire risk area (LBRA): areas assigned a fire hazard rating of "low"
+  
+
+```{r}
+lbra <- sf::st_read(here::here("data/LBRA/Low_bushfire_rating_areas.shp"))
+
+sf::st_geometry(lbra) %>% 
+  plot()
+
+tmap::tm_shape(lbra) +
+  tmap::tm_polygons()
+```
+
+# grassland curing
+
+    data source
+- https://portal.tern.org.au/grassland-curing-modis-states-coverage/21005
+
+    About grassland curing
+- green lush grassland; unlikely to burn // dry brown grassland; likely; burn
+- grassland curing: natural process; change grassland; from green(0%) to brown(100%)
+  - 10-30%: unlikely to burn
+  - 40-60%: in between
+  - 70-100%: likely; burn rapidly 
+
+```{r}
+raster::raster(here::here("data/grassland_curing.tif")) %>% 
+  raster::getValues()
+```
+
+
+
+
+
+
+

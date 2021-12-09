@@ -1,0 +1,570 @@
+---
+title: "Development of Bushfire Risk Prediction Web App in Victoria using Open Data"
+author: "Brenwin Ang & Helen Evangelina"
+date: "12/11/2021"
+output:
+  bookdown::html_document2:
+    number_sections: false
+bibliography: references.bib
+---
+
+```{r setup, include = FALSE}
+# --- load libraries
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(patchwork)
+library(tmap)
+library(knitr)
+library(kableExtra)
+library(tidymodels)
+library(GGally)
+library(ranger)
+library(kableExtra)
+library(lime)
+library(raster)
+library(gridExtra)
+library(tmap)
+library(lubridate)
+```
+
+```{r}
+# --- load relevant variables 
+load(here::here("VICfire/data/eda_report.RData"))
+load(here::here("VICfire/data/ida_report.RData"))
+load(here::here("VICfire/data/report_data.RData"))
+load(here::here("VICfire/data/hotspot.RData"))
+```
+
+
+
+# Introduction and Motivation
+
+Bushfires is a common and natural phenomemon that occurs frequently in many places around the world. Victoria, Australia however, is one of the most fire-prone regions in the world - given its fire conducive weather and fuel conditions. It is an intrinsic and inevitable part of Australia’s environment which has significantly shaped our landscape [@geoscience]. Survey studies by ANU shown that about 80% affects Australians in some way whether through direct damage or indirectly through anxiety or smoke (@aus-bf-imp). 
+
+There have been catastrophic bushfire events in the past including Black Saturday 2009 in Victoria, Ash Wednesday 1983 in Victoria and South Australia, the 2006 December bushfires, as well as the recent 2019-2020 bushfires. (@ffm-past) Canada, USA, Turkey, Greece, Italy and Russia faced a devastating bushfire season in the summer of 2021 since it was the hottest July ever recorded, raising concern for Australia since it is moving into summer. Especially since the 2019-2020 bushfire in Australia known colloquially as Black Summer resulted to more damages on property and the environment compared to other bushfire events in history, with 3094 houses destroyed and over 17M hectares of land burned [@bushfire1]. 
+
+Even though bushfires cannot be avoided naturally, their consequences can be minimised. Thus, it is important to understand and predict the risk of bushfire as understanding the risk of fire of certain areas would help in developing strategies for mitigating the risks. Effective bushfire risk management pivots around providing relevant and timely data to both the emergency personnel and public. For instance, a prediction model can tell us whether an area has a high risk of bushfire, so resources can be focused on areas with high fire risk.
+
+This report condenses the research work on bushfire risk modelling done by Brenwin Ang and Helen Evangelina as part of their internship for ETC5543 Business Analytics Creative Activity coursework. This work focus its window of study in Victoria. This is an extension to the work done by Di Cook, Emily Dodwell and Patrick Li on hotspot clustering algorithm. It is based on Patrick Li’s thesis titled “Using Remote Sensing Data to Understand Fire Ignitions in Victoria during the 2019-2020 Australian Bushfire Season” [@patricksthesis]. Weather is considered a determinant for forest fires. Therefore, environmental variables such as temperature, relative humidity, wind speed, radiation, drought index, etc will be used in the modelling as predictors. 
+
+Generally, fire risk is defined as the likelihood of a fire occurring, multiplied by the severity of the fire [@merton]. In the case of this report, fire risk is defined as likelihood of fire ignition occurring. The overall objective of this work is to develop a `Shiny` web app to monitor potential fire ignitions, incorporating fire risk model developed to monitor the 2021-2022 Victorian bushfire season based on environmental variables in where users would be able to toggle the input values of the environmental variables which would be incorporated the risk predictions. The resulting app seeks to enable easy access to bushfire information, raise awareness to bushfires and provide data information to make informed decisions to better adapt to the many impacts of climate change. The corresponding github repository including Patrick’s thesis can be found [here](https://github.com/numbats/bushyr).
+
+
+
+# Data Sources and Integration
+
+Following data analysis is based off the map of Victoria that is divided into 20x20 cells. Each cell is roughly $0.451° \times 0.257°$ (or $50km \times 28km$). Note that only cells within Victoria were considered. The partitioning the study area into equally-sized marked grid cells greatly facilitates the analysis- allows comparisons between cells, point-based fire ignitions to be viewed not just as individual points but as a spatially varying density throughout the study area. The cell cize can be determined through exploratory data analysis (@cardille2001occurrence). From (other) gridded data or vector data, it also allows numeric and categorical variables to be co-registered to each cell.  A coarse grid cell was deemed adequate to spread out the spatial variation or likelihood of fire ignitions while conserving landscape-level attributes. Nevertheless, this is easily tunable.
+
+The study also only focuses on bushfire seasons of October through to March given most fire occur during these period. Data dates from 2016 to 2021. The period of data used presents a trade-off- the data must be long enough to capture the temporal variability but not too long that it ignores the changes in the data such as climate change or human-induced spatial ignition patterns. (@burn_p3)
+
+## Fire Ignitions Data
+
+Fire ignitions are represented as spatial points on the map. There were two sources of bushfire ignitions data.
+
+Firstly, satellite hotspot data from Himawari-8 satellite taken from the [Japan Aerospace Exporation Agency FTP site](https://www.eorc.jaxa.jp/ptree/faq.html). Himawari-8 data is a remote sensing data collected by remote sensors carried by a satellite. Upside of this data is that it provides a high temporal and spatial resolution. It is able to capture bushfires starting from remote areas very difficult to access by foot. Additionally, it has a 10-minute time resolution. Fire ignitions were detected in real-time using a clustering algorithm produced previously. (more information on how this is done can be found in [Patrick's thesis on github](https://github.com/TengMCing/bushfire-paper)). 
+
+Secondly, historical First Responder's data, this can be thought of as fires reported upon sight. That is, based on where the First Responder saw the fire. This is sourced from the Department of Environment, Land, Water and Planning (DELWP). Most of these were reports from volunteers manning fire toweres erected around Victoria. (See appendix for map of fire towers around Victoria)
+
+
+## Climate and Landscape Variables
+
+For a bushfire to ignite, it needs an ignition source and conducive weather and landscape conditions. Fire ignitions can be classified into 4 categories- lightning, arson, accident and planned burning off (back burning which escaped containment line). Previous analysis suggests more than 80% of fires can be attributed to lightning. @the-conv. 
+
+```{r var-tab}
+tibble::tribble(~data_source, ~variables, ~format, ~temporal_resolution, ~spatial_resolution,
+                "SILO (https://www.longpaddock.qld.gov.au/silo/)", "max_temp, rh, radiation, et_short_crop, daily_rain", "NetCDF", "daily", "0.05° x 0.05°",
+                
+                "ERA5 Reanalysis data (https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels-monthly-means?tab=overview)", "lai_hv, lai_lv, WS10", "NetCDF" ,"monthly", "0.25° x 0.25°",
+                
+                "BoM's AWRA-L (http://www.bom.gov.au/water/landscape/#/sm/Actual/month/-26.32/132.54/3/Point/Separate/-15.6/130.25/2021/4/30/)", "s0_pct", "NetCDF", "monthly", "0.05° x 0.05°",
+                
+                "Department of Environment, Land, Water and Planning (DELWP) (https://discover.data.vic.gov.au/dataset/forest-types-of-victoria)", "vic_forest", "ShapeFile", "Periodic", "vector data") %>% 
+  knitr::kable(caption = "data source, variables, format and temporal resolution used in this study") %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+In this analysis, 11 covariates are considered to identify their effect on bushfire ignitions. These variables are: maximum temperature (`max_temp`) ($°C$), relative humidity (`rh`) ($\%$), solar radiation (`radiation`) ($MJ/m^2$), derived FAO56 short crop evapotranspiration rate (`et_short_crop`) ($mm$), daily rainfall (`daily_rain`) ($mm$), leaf area index in high vegetation in $m^2 \ m^{-2}$ (`lai_hv`) ($m^2 \ m^{-2}$), leaf area index in low vegetation (`lai_lv`) ($m^2 \ m^{-2}$), 10m wind speed (`WS10`) ($m\ s^{-1}$)  and  forest type in Victoria (`vic_forest`). Information about the data sources of each of the variables presented in Table \@ref(tab:var-tab) above. *More information regarding the data sources can be found in the Appendix.
+
+A subset of these variables namely `max_temp`, `rh`, `WS10` and `et_short_crop` (proxy for meteorological drought index) are used in McArthur Forest Fire Danger Index (FFDI), which is used widely around Australia to measure the degree of danger of fire in Australian forests. @bf-crc A plethora of studies have investigated the causes of widespread bushfires. However, to date, most of the existing literature focuses mainly on bushfire spread rather than ignitions. 
+
+As seen in the table, many of these data sources provide too fine a spatial grid resolution than required for our structure. Therefore, these are regridded to match the $20 \times 20$ gridded Victoria map. For numeric variables (all except `vic_forest`), the values of the finer cells within our larger cells are averaged. Categorical variable (`vic_forest`) are encoded into indicator variables, for example, any grid cell containing a forest is set to a value of 1, and 0 otherwise.    
+
+Additionally, 2 months lag of each of the variable (except `vic_forest` since it is periodic data) was included in the modelling. Studies have shown that not just current conditions but ongoing conditions such as heatwaves or drought creates favourable for bushfire ignitions. @causes_abf
+
+In the process, we automated the workflow of extracting the variables from the various sources- giving access to a wide range of potential predictors. 
+
+```{r max-temp, fig.cap="Average max temperature for the month of May 2021", eval = FALSE}
+max_temp_raster_crop %>% 
+  raster::reclassify(rcl = cbind(NA, 0)) %>% # reclassify NA values to 0
+  # raster -> spdf -> sf
+  as(., "SpatialPolygonsDataFrame") %>% 
+  sf::st_as_sf() %>%
+  dplyr::select(X2021.05.01:X2021.05.31) %>% 
+  # pivot_longer; change to tibble; since `pivot_longer` not compatible with `sf` yet
+  as_tibble() %>% 
+  mutate(id = 1:400,
+         .before = "X2021.05.01") %>% 
+  tidyr::pivot_longer(cols = X2021.05.01:X2021.05.31,
+                      names_to = "date",
+                      values_to = "max_temp") %>% 
+  # to `sf`
+  sf::st_as_sf() %>% 
+  group_by(id) %>% 
+  summarise(mean_max_temp = mean(max_temp)) %>% 
+  tmap::tm_shape(.,
+                 name = "max_temp cell") +
+  tm_polygons(col = "mean_max_temp",
+              alpha = 0.5) +
+  
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) + # line width
+  
+  tm_layout(main.title = "Map of Victoria in 20x20 grid cells") +
+  tm_basemap(leaflet::providers$OpenStreetMap) +
+  tmap::tm_layout(main.title = "Mean Max Temperature Across Victoria for May 2021")
+```
+
+## Himawari-8 hotspot data processing
+
+The hotspot data from Himawari-8 [@jaxa] firstly needs to be selected to those within the boundary of Victoria. To reduce noise, it is then filtered based on the fire power with a recommended threshold of over 100 (irradiance over 100 watts per square metre) [@hotspots]. 
+
+The hotspot data from Himawari-8 needs to be grouped into clusters because some hotspots are branches of an existing bushfire. Therefore, we use spatio-temporal clustering to group the hotspots into clusters. Clustering algorithm used in this project is based on Weihao Li’s thesis (citation & reference), inspired by two existing clustering algorithm, Density Based Spatial Clustering of Applications with Noise (DBSCAN) [@ester] and Fire Spread Reconstruction (FSR) [@loboda]. 
+
+The issue with using DBSCAN for clustering hotspot data is its algorithm assumes the clustering rules work in both directions of a timeline, which does not capture the reality that bushfires evolve over time in one direction. It is not suitable for temporal data. FSR reconstructs bushfire spread well, however it is constructing the clusters sequentially. This means that FSR will consider two fires to be a single fire if they commence at different locations but they overlap. Because of this, FSR does not reflect the real speed of bushfire correctly. Other limitation of FSR is that it lacks detailed consideration of parameter tuning. Weihao Li’s clustering algorithm is inspired by these two algorithms, and it can efficiently and robustly cluster hotspot to consider the temporal behavior of bushfires.
+
+There are four steps in the clustering algorithm. The first step is to slice the temporal dimension based on a parameter named ActiveTime. Next, the hotspots are clustered spatially by using a parameter called AjdDist, which reflects the potential distance a fire can spread with respect to the temporal resolution of the data. Hotspots in the same component will be assigned a unique membership id. The third step is to broadcast the clustering results and update the membership label. Lastly, the ignition locations are computed with the earliest observed hotspot indicates the ignition point. If there are several earliest hotspots, the centroid of these points is used. 
+
+The clustering algorithm slices the data by its temporal dimension and splits the spatio-temporal clustering tasks into thousands spatial clustering tasks. The result of the clustering is a dataset consisting of four variables – unique identifier, longitude, latitude, and time. The final hotspot data used for this project consists of 2,917 observations from 2016 to 2021. The maps below illustrate the spatial distribution of ignition points on the raw hotspot data and on the clustered hotspot data. 
+
+```{r raw-hotspot}
+# raw hotspot data
+coordinates(hotspot20172018) <- c("lon", "lat")
+
+xh_raw <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xh_raw[] <- 0
+
+tabh_raw <- table(cellFromXY(xh_raw, hotspot20172018))
+
+xh_raw[as.numeric(names(tabh_raw))] <- tabh_raw
+
+plot(xh_raw,
+     xaxt = "n",
+     yaxt = "n")
+
+points(hotspot20172018, 
+       pch = 20)
+```
+
+```{r clustered-hotspot}
+# clustered hotspot data
+coordinates(hotspot_clustered20172018) <- c("lon", "lat")
+
+xh_cl <- raster(xmn = 141,
+            xmx = 150, 
+            ymn = -39,
+            ymx = -34,
+            res = 0.4, 
+            crs = "+proj=longlat +datum=WGS84")
+
+xh_cl[] <- 0
+
+tabh_cl <- table(cellFromXY(xh_cl, hotspot_clustered20172018))
+
+xh_cl[as.numeric(names(tabh_cl))] <- tabh_cl
+
+plot(xh_cl,
+     xaxt = "n",
+     yaxt = "n")
+
+points(hotspot_clustered20172018, pch = 20)
+```
+
+
+
+# Model Building
+
+To prevent overlaps of fire ignitions, only one of the historical or satellite fire ignition data is chosen for the purpose of modelling. Historical fire data might not represent the accurate locations of the bushfire ignitions. Fire might start in a remote location which might be hard to visually access or monitor. Therefore, to choose which fire data to use for our modelling, a comparison of the historical fire data and the satellite data is done. The satellite data used here is the clustered satellite data.
+
+## Comparison of Hotspot and Historical Fire Data
+
+```{r fire-bf-month, fig.cap="The comparison of the number of fire ignitions between hotspot data and historical data against bushfire seasons(top) and month(bottom)."}
+# --- fire ignitions by bushfire season
+p1 <- cause_join_count_bf_season %>% 
+  filter(bf_season %in% unique(cluster_16_21_count_bf_season$bf_season)) %>% 
+  dplyr::select(bf_season, total) %>% 
+  # join cluster & join data counts
+  right_join(cluster_16_21_count_bf_season,
+            by = "bf_season") %>% 
+  rename(total_join = total.x,
+         total_cluster = total.y) %>% # fire ignitions; in clustering data (2016-2021)
+  distinct(bf_season,
+           .keep_all = T) %>% 
+  dplyr::select(-data) %>% 
+  pivot_longer(cols = total_join:total_cluster,
+               names_to = "data", # in join (historical(2000-2019) & sat(2019-2020))// cluster(2016-2021)
+               values_to = "n") %>% # no. of fire ignitions
+  ggplot() +
+  geom_col(aes(x = bf_season,
+               y = n,
+               fill = data),
+           position = "dodge",
+           width = 0.23) +
+  colorspace::scale_fill_discrete_qualitative(labels = c("clustering", "historical")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Fire ignitions by bushfire season",
+       x = "bushfire season",
+       y = "number of ignitions")
+
+
+# --- fire ignitions by month
+p2 <- left_join(cluster_16_21_count_month, cause_join_count_month,
+          by = c("bf_season", "month")) %>% 
+  rename(total_cluster = n.x,
+         total_join = n.y) %>% 
+  pivot_longer(cols = total_cluster:total_join,
+               names_to = "data",
+               values_to = "n") %>% 
+  ggplot() +
+  geom_col(aes(x = factor(month,
+                          levels = c(10, 11, 12, 1, 2, 3)),
+               y = n,
+               fill = data),
+           position = "dodge") +
+  facet_wrap(. ~ bf_season) + 
+  colorspace::scale_fill_discrete_qualitative(labels = c("clustering", "historical")) +
+  theme_bw() +
+  labs(title = "Fire ignitions each month facet by bushfire season",
+       x = "month",
+       y = "number of ignitions") 
+  
+
+p1 / p2 +
+  plot_layout(guides = "collect")
+```
+
+Number of ignitions in each data set is plotted against bushfire season (top) and month (bottom) in Figure \@ref(fig:fire-bf-month) above. The lack of agreeableness both the datasets is apparent. In particular, there were considerably more bushfire ignitions in 2016-2017 bushfire season in the clustered data especially in the months January to March. Meanwhile in 2017-2018, there were more observations in the historical data except for March. This suggests that the number of fires differs on the historical data and hotspot data. One obvious insight here is that the number of observations is not consistent monthly, indicating that month is an important factor in determining the risk of fire. 
+
+```{r comparison-map, fig.cap= "The spatial representation of the differences in the historical data and the satellite data. Differences are computed by substracting the number of fires in the historical data with the number of fire in the satellite data."}
+# join no. of fires per cell; for historical & cluster data
+dplyr::inner_join(ignition_rasterize_training_sf_bf_season, ignition_rasterize_cluster_bf_season %>% sf::st_set_geometry(NULL),
+           by = c("id", "bf_season")) %>%
+  rename(fire_count_training = fire_count.x,
+         fire_count_cluster = fire_count.y) %>% 
+  # compute difference = historical - cluster
+  mutate(diff = fire_count_training - fire_count_cluster) %>% 
+  mutate(diff = case_when(
+    diff == 0 ~ NA_real_,
+    TRUE ~ diff
+  )) %>% 
+  tmap::tm_shape(name = "fire_count diff") +
+  tmap::tm_polygons(col = "diff",
+                    palette = "RdBu",
+                    n = 6,
+                    group = "diff",
+                    id = "id",
+                    alpha = 0.6) +
+  # facet by bushfire season  
+  tmap::tm_facets(by = "bf_season",
+                  ncol = 1) +
+  
+  # include Vic map outline
+  tmap::tm_shape(vic_map_sf,
+                 name = "Victoria map outline") +
+  tmap::tm_borders(lwd = 3) +
+  
+  # baselayer
+  tmap::tm_basemap(leaflet::providers$OpenStreetMap)
+```
+
+The differences in the spatial distributions of ignitions in both the data sets were done by computing the difference in number of ignitions (points) contained within in cell i.e. historical ignitions - satellite ignitions per cell. From figure \@ref(fig:comparison-map), there is obvious difference in how the fire ignitions are scattered around the map. Historical data is more concentrated in the map while satellite data tend to be more scattered. There is also strikingly more observations near Melbourne CBD for historical data sets, indicating that there are more fires in areas where there are more people. Meanwhile, the satellite data shows that there are so little fires around the city center which might be due to the filtering of firepower. There are a lot of fires in remote areas which are not captured by the historical data, which might be due to these remote fires not being able to be monitored by people directly.  Satellite data, on the other hand, can capture these fires well.
+
+In conclusion, satellite or hotspot data provides more accurate locations and time of bushfire ignitions as satellite data captures fires in remote areas not visually accessible by people. There are a few hypothesis pertaining to the inaccuracies of the historical data. Firstly, it is difficult to distinguish the number of fires one observes with the naked eye. For the same reason, it is less accurate and more subjective to gauge the location of a fire as compared to satellite technology. Equally important is the issues regarding the consistency of fire tower manning at each station. Therefore, the satellite ignition data is used. 
+
+## Overview
+The most common choice for bushfire risk modelling is the generalised additive model (GAM), which is used by Bates, McCaw, and Dowdy (2018) to predict the number of lightning ignitions in Western Australia. Simpler parametric models have also been used to predict the risk of bushfire, including multiple linear regression and generalized logistic regression.  The predictors used for these models are environmental variables like weather variables and vegetation types. However, little of the models use hotspot data to predict the risk of bushfire.
+
+For the purpose of modelling, the data is split into training and test set. The training set consists of those data for 2016-2020, while the test set consists of the data for 2020-2021. Splitting data to training and test set is important in model building to check the accuracy of the model and prevent over-fitting or under-fitting. A model might perform well in the training set, but not perform well once it is applied to the test set. The accuracy of our model can be tested using the test set. In this case, the test set consists of the most recent year because the 2021-2022 is more likely to be similar to 2020-2021. The reason different bushfire period is chosen as the test set is because we want to see if our model can provide a good prediction for different periods. We explored some models with our final model being random forest model.
+
+## Random Forest Model
+
+Random forest [@rf] is a supervised learning technique that is constructing hundreds of regression trees by using ensemble learning, combined to a robust prediction model. It consists of a large number of decision trees, which are combined by taking the mean of the predicted y values as the prediction of all trees. A random forest model is built from a bootstrap sample of the data. Each tree at each parent node is constructed from p randomly selected predictors [@rf2]. The trees run in parallel without any interactions amongst them [@rf-regression]. Random forest is well suited for non-linear relationships, which is suitable for our case as the relationship between environmental variables and the fire risk is non-linear. In this case, we are using random forest for regression problem in where the splitting in each node is based on minimising RSS.
+
+An issue with modelling the risk of bushfire based on environmental variable is the collinearity between variables. For example, relative humidity changes when temperature changes. An evidence of multicollinearity in our data can be seen in \@ref(fig:collinearity). Random forest model can handle multicollinearity problem well as it offers protection against the impact of collinearity between predictors [@rf2]. The reason for this is because random forest only considers a subset of predictors at each split, resulting to decorrelated trees. Even though multicollinearity is not a problem for the random forest algorithm itself, it might be a problem for the variable importance. Feature importance might be affected by multicollinearity as the importance of variables with high collinearity will be offset by each other. 
+
+```{r collinearity, fig.cap= "The figure shows the correlation matrix of the variables in our data. There are some variables in our data with high correlations, such as radiation has a really high correlation with et_short_crop (0.9)." }
+data_corr <- train %>%
+  ungroup() %>%
+  dplyr::select(-id, -year) 
+ggcorr(data_corr, label = T)
+```
+
+Based on the previous analysis, month is an important variable in determining the risk of fire as the risk of bushfire differs monthly. Month is treated as a factor variable in the model. A random forest model with all the variables in the dataset as the explanatory variables is fitted. Our first random forest model is a model fitted using `ranger` [@ranger] without specifying the number of trees (ntree) and the number of variables used in each tree (mtry). The result is a random forest model by using 500 ntree and 5 mtry. This model has a mean of squared residuals of 2.1878 and R-squared of 0.396 as seen on table \@ref(tab:train-summary). Test MSE resulted from this model is 2.379 with an R-squared of 0.23, indicating that random forest is better than a linear regression model. Summary statistics of the test set on the random forest model is on table \@ref(tab:test-summary).
+
+```{r}
+train_final <- train %>% 
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-year) %>% mutate(month = as.factor(month))
+
+set.seed(2021)
+randomforest1 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity")
+```
+
+```{r train-summary}
+# Function for evaluating model
+model_summary <- function(truth, estimate){
+  
+  df_new <- data.frame(truth = truth,
+                       estimate = estimate)
+  
+  data.frame(RMSE = rmse_vec(truth, estimate),
+             MAE = mae_vec(truth, estimate),
+             "R-Square" = rsq_vec(truth, estimate),
+             check.names = F
+             ) %>% 
+   mutate(MSE = mean((truth - estimate)^2))
+}
+
+predictions <- randomforest1$predictions
+predicted_data <- train %>% bind_cols(predictions = predictions)
+kable(model_summary(truth = train$fire_count,
+           estimate = predictions),
+      caption = "Summary statistics of the random forest model on test set.")
+```
+
+
+```{r test-summary}
+test2 <- test %>%
+  left_join(lonlat, by = "id") %>%
+  dplyr::select(-id, -year) %>%
+  mutate(month = as.factor(month))
+
+predicted <- predict(randomforest1, test2)$predictions
+
+kable(model_summary(truth = test2$fire_count,
+                    estimate = predicted),
+      caption = "Summary statistics of the random forest model on test set.")
+```
+
+### Features Selection
+
+We explored if only including the important variables would make the model better. Variable importance on a random forest with multicollinearity in the data could not really be trusted, therefore `lime` [@lime] is used to understand which variables contribute most to the prediction of bushfire risk. Local Interpretable Model-agnostic Explanation (LIME) can explain the predictions of a regression problem in an interpretable manner, which is done by learning an interpretable model locally around the prediction [@black-box]. The data is split into data with high fire counts and data with low fire counts. Then, 4 observations are sampled from each data, which will tehn be passed to the `explain` function. 
+
+
+```{r}
+set.seed(2021)
+train2 <- train_final %>% dplyr::select(-fire_count)
+
+explainer <- lime(x = train2,
+                  model = randomforest1) 
+
+# dealing with model_type error
+model_type.randomForest <- function(x){
+  return("regression") # for regression problem
+}
+
+predict_model.randomForest <- function(x, newdata, type = "response") {
+
+    # return prediction value
+    predict(x, newdata) %>% as.data.frame()
+    
+}
+
+# sampling data
+data_low <- train_final %>% filter(fire_count < 5)
+data_high <- train_final %>% filter(fire_count>5)
+
+set.seed(2021)
+lime_sample1 <- sample(1:length(data_low),4)
+lime_sample2 <- sample(1:length(data_high),4)
+
+data_selected1 <- data_low[lime_sample1, ]
+data_selected2 <- data_high[lime_sample2, ]
+data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
+  dplyr::select(-fire_count)
+
+# creating explanation
+explanation <- explain(x = data_selected,
+                       explainer = explainer, 
+                       feature_select = "auto",
+                       n_features = 15)
+
+explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
+explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
+```
+
+```{r plot-features, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the low fire counts."}
+plot_features(explanation1)
+```
+
+```{r features-plot, fig.cap= "The figure illustrates the variables which are deemed as important in predicting the fir risk for the high fire counts."}
+plot_features(explanation2)
+```
+
+Figure \@ref(fig:plot-features) illustrates the predictors which explain most of the fire risk prediction for the low fire counts with the x-axis showing the relative magnitude and direction of each predictors. While figure \@ref(fig:features-plot) shows those for the high fire counts. It can be seen that forest and month are really important in both cases, followed by surface soil moisture (`s0_pct`), wind speed (`si10`), and `radiation.` The top 15 features  are mostly the same for all the observations. These important features are used to fit a random forest model, however this new model has a higher mean of squared residuals. Hence, we decided to proceed with the random forest model with all of the variables. 
+
+### Parameters tuning
+To increase the accuracy of the model, paramaters tuning is done by using the `tuneRanger` package [@tuneRanger] to find the best values of parameters for the model. Lowest error is achieved when mtry is equal to 8 and ntree equal to 500. Another random forest is then fitted with these parameters and all of the predictors. This results to a 1.212 mean of squared error and R-squared of 0.399, which is slightly better than the previous model. Applying the model to the test set results to a slightly higher MSE (2.39) and a slightly lower R-squared (0.21), indicating that the tuned model is slightly worse than the previous model. This might be due to the random forest model to overfit the training data, hence why it does not perform better on the test set. Summary statistics of the tuned model on the test set can be seen on table \@ref(tab:test-summary2) Even though the tuned model performs better on the training set, it performs worse on the test set. This indicates that the tuned model might over-fit the training set, therefore we choose to go with the un-tuned model.
+
+```{r test-summary2}
+set.seed(2021)
+randomforest2 <- ranger(fire_count ~ .-id, data = train_final, importance = "impurity",num.threads=8,verbose=FALSE,mtry=8,min.node.size=2,num.trees=500,replace=FALSE)
+
+predicted2 <- predict(randomforest2, test2)$predictions
+
+kable(model_summary(truth = test2$fire_count,
+                    estimate = predicted2),
+      caption = "Summary statistics of the random forest model on test set.")
+```
+
+To evaluate the model more, the residuals are calculated and plotted against the predicted values. There are some high residuals, indicating that the model is not predicting some observations well. Figure \@ref(fig:map-rf1) shows the representation of the actual monthly fire counts and predicted fire counts on the training set. One clear thing to notice here is that our model tends to under-predict the fire counts, especially in March. This is due to the many zeros in our response variable which might bring down the prediction. Figure \@ref(fig:map-rf-test) shows the comparison for the test set. The predictions for the test set do not really capture the observed fire counts, which might be due to the different situations in 2020-2021 and the different number of fires every bushfire period. 2020-2021 has a higher number of fires, especially in January and March, which needs to be further explored in future works. Looking at the proportions of fire instead of counts might be better because looking at the pattern on the map, the model predicts those cells with higher observed fire counts to have higher predicted fire counts compared to others.
+
+```{r map-rf1, fig.cap = "A map of the monthly fire counts of the actual (left) vs the predicted values (right) resulted from the random forest model for the training set.", warning = FALSE, message = FALSE}
+tmap_arrange(actual_oct, pred_oct,
+             actual_nov, pred_nov,
+             actual_dec, pred_dec,
+             actual_jan, pred_jan,
+             actual_feb, pred_feb,
+             actual_mar, pred_mar)
+```
+
+```{r map-rf-test, fig.cap = "A map of the monthly fire counts of the actual (left) vs the predicted values (right) resulted from the random forest model for the test set.", warning = FALSE, message = FALSE}
+tmap_arrange( test_actual_oct, test_pred_oct,
+              test_actual_nov, test_pred_nov,
+              test_actual_dec, test_pred_dec,
+              test_actual_jan, test_pred_jan,
+              test_actual_feb, test_pred_feb,
+              test_actual_mar, test_pred_mar)
+```
+
+After exploring some modeling alternatives, random forest is chosen as the final model. The first reason is due to the non-linear relationship between the weather variables and fire counts, a linear model would not be sufficient. Random forest is great for working with non-linear relationships between the response and explanatory variables. Secondly, random forest can handle multicollinearity problem well. Other than that, random forest works well on large datasets and standardising the data is not required as it uses a rule-based approach. For these reasons, random forest outperforms other modelling techniques. A limitation of random forest model is it cannot work with previously unseen data because the random forest regressor is unable to discover trends is not able to discover trends for it to extrapolate outside the training data.
+
+Another limitation of the model is that there are a lot of zeros in the data, which might result to the under-prediction of fire counts. There are some high residuals which might be due to the huge amount of zeros in the data, which might affect the predictions for those with similar weather conditions but with a high fire counts. Additionally, the random forest uses variables which represent weather conditions, which might not account for accident-based fires. We might also be missing some variables that are useful for predicting the risk of fire, like distance to road. This could be a consideration for our future work to include more variables.
+
+## Choosing the Random Forests and Model Alternatives
+
+A lasso regression was attempted to parse out important variables. Depending on the penalty ($\lambda$) term imposed on the least square optimisation problem has the effect of shrinking (unimportant) variables to zero/very small coefficient. While lasso regression can be a good regularisation technique to sieve out important variables, it is inadequate for modelling in our scenario. This is mainly due to the structure of our variables. The climate variables are highly correlated as one might expect. For example, with high `daily_rain` one can expect a lower `max_temp` or a variable with its lag variables are highly correlated. These relations exist across many of our variables thus indicating high  multicollinearity
+
+```{r vif-tab}
+lm_fit <- stats::lm(formula = log(fire_count + 1) ~ . -id -year -month,
+                    data = model_df2)
+
+car::vif(lm_fit) %>% 
+  as_tibble(rownames = "variable") %>% 
+  rename(VIF = value) %>% 
+  # extract variables with highest VIF 
+  slice_max(VIF, 
+            n = 6) %>% 
+  kable(digits = 2,
+        caption = "Variables with largest Variance Inflation Factors(VIF)") %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+
+To demonstrate, we fit a simple linear model and compute the Variance Inflation Factor (VIF). The 6 variables with the highest VIF is shown in Table \@ref(tab:vif-tab). A general rule of thumb is that if VIF $> 10$ then multicollinearity is high @andreaperlato. Lasso's objective function provides unstable solutions in prescence of collinear features or features with very similar information. @schreiber2018regulation 
+
+Therefore, due to the inherent interplay between the variables, lasso regression is not used for modelling. For the same reason, generalised linear models(GLMs) attempted such as Poisson regression were ruled out. 
+
+Since ensemble learning with random forest process can deal with these issues, it was deemed suitable in our modelling scenario. Random forests had been used in several studies to model bushfire susceptibility. (@gigovic2019testing) 
+
+## Final Model
+The final model is fitted on all of the data, including the test set, using the `ranger` package due to the much faster computation compared to the `randomforest` package. This model has a 0.42 R-squared and 1.92 of MSE. Summary statistics of the model can be seen on Table \@ref(tab:final-model-summary). 
+
+```{r final-model-summary}
+model <- readRDS(here::here("VICfire/model/rfmodel_final.rds"))
+final_data <- read.csv(here::here("VICfire/data/model_df2.csv")) %>% na.omit()
+
+predictions_final <- model$predictions
+predicted_data_final <-  final_data %>% 
+  bind_cols(predictions = predictions_final)
+kable(model_summary(truth = final_data$fire_count,
+           estimate = predictions_final),
+      caption = "Summary statistics of the final random forest model.")
+```
+
+
+# Shiny Web application (User-Interface)
+
+The outputs of data processing and bushfire predictions are put together in an app. This app is an extension to an previously made `RShiny` app (publicly available at [Monash University's Department of Econometrics and Business Statistics website](https://ebsmonash.shinyapps.io/VICfire/). The previous app allow users to visualise bushfires in Victoria at a period of time of their choosing. Outputs are based on the clustering results. Also, a model predicts the cause of bushfire; given a bushfire ignition. Our complementary goal (as per Research grant) is to develop risk model to visualise and monitor potential fire ignitions and track fires from satellite hotspots, in real time, for 2021-2022 Victorian bushfire season.   
+
+`RShiny` allows for elegant interactive exploratory plots and updates in real-time for swift decision making. It is also highly customisable to enhance users' interface. Furthermore, it supplies convenience function to assemble the html website in `R` and is easy to deploy. 
+
+The current project builds on the "Fire Risk" Tab. On top of the historical bushfire information and bushfire `cause` prediction, this complementary addition serves to inform users with historical information risk and up-to-date predictions around bushfire risk. We maintained a similar design for the structure of the app - keeping separate tabs for historical information and predictions. This is to cater for different users who might be using the app. Fire personnels might be interested in the weather and landscape variables creating the conducive fire environment. Plots and data are made downloadable. The github link is also provided in the app to allow users to download the model object and play around with it. While users would be interested in bushfire predictions on the go while planning a trip. User can choose the bushfire seasons to overlay historical ignition points.  
+
+```{r bushfire-app, fig.cap="Bushfire Risk Prediction tab"}
+knitr::include_graphics(here::here("VICfire/data/report/bushfire-app.png"))
+```
+
+The final state of the bushfire risk prediction tab is shown in Figure \@ref(fig:bushfire-app). The main panel of the app shows a map of Victoria in a 20x20 grid cells with bushfire risk predictions for each of the cells in terms of proportions, calculated based on the baseline total, which is the total fires in the monthly baseline average. The random forest model is incorporated to predict the risk of bushfire based on weather variables. Users will be able to toggle the various variables and make forecasts under different scenarios.
+
+User interactivity includes toggling the values of the variables (daily rain, evapotranspiration rate, maximum temperature, radiation, relative humidity, wind speed, and surface soil moisture). These variables are chosen based on the variable importance using `LIME` package. On the left side of the app is where users can play around with the variables. The changes are based on the standard deviations of each variables for each cell id with a range of -4sd to 4sd, which means that -100% is referring to the values being deducted by 4 standard deviations, while 100% means that the values is being increased by 4 standard deviations. The slider input is limited to values which are in the range of the variables. When users change the values, the updated predictions would be visualised on the map after the apply button is clicked. A choice of months is presented on the app to allow users to choose which months they want to visualise. After playing around with the variables, users can reset the variables to the initial average values by clicking the `reset` button. 
+
+Upon clicking a cell, the means and standard deviations of each of the variables for each cell id are shown on the right side of the slider input. Other than that, plots of the historical values of the weather variables will be provided on the right panel, while a data table presenting the predictions will be shown on the bottom side of the app. These plots illustrate the historical values of the variables, presented with the green line. When users change the values, the pink line will change to represent the updated values. A label presenting the predictions will pop up as shown in Figure \@ref(fig:clicked-cell). [NEED TO UPDATE THIS]
+
+```{r clicked-cell, fig.cap="When users click on a specific cell, information related to the cell will pop out."}
+knitr::include_graphics(here::here("VICfire/data/report/clicked-cell.png"))
+```
+
+This prediction app will be combined with the historical bushfire app to provide a comprehensive information for users.
+
+# Final insights
+Based on the risk predictions model, different months have different risks of bushfire with March being the most risky month, followed by January and December. October is the least risky month. Another insight is that different months have different risky locations. These following locations are deemed to be generally risky of bushfires: 
+- Inglewood  
+- Horsham  
+- Edenhope  
+- Hamilton  
+- Dunkeld  
+- Mortlake  
+- Casterton  
+- Willaura  
+- Mount Elizabeth Nature Conservation Reserve  
+- Snowy River National Park  
+- Murray Sunset National Park  
+- Warburton   
+- Macalister Gorge Natural Features and Scenic Reserve  
+- Lake Gnarpurt  
+- Katamatite  
+
+
+# Summary and future works
+To assess bushfire risk in Victoria, a Shiny web application is developed to help monitor potential fire ignitions using the satellite data. For predicting the risk of fire, different modelling alternatives were explored. This will be used as a prototype to predict the bushfire risk 2021-2022 bushfire season based on weather and landscape conditions. The best model was deemed to be a random forest model which appropriately incorporates various weather and climate variables.  Random forest model outperforms other modelling techniques because random forest is great to capture the non-linear relationship between the response and explanatory variables. Furthermore, random forest handles the multicollinearity structure in the data well. The model gives a training mean squared error of 1.216 and R-squared of 0.396. However, applying the model to the test set results to a slightly lower R-squared and higher MSE. The reason for this might be because the model tends to over-fit the training set, resulting to less accurate predictions for the test set. Additionally, our model tends to under-predict due to a lot of zeros in our data. It is also important to note that the response (fire ignitions) has been erratic going from one year to another. 
+
+The final model is fitted on all of the data, including the test set. This results to a model with 0.42 R-squared and 1.92 MSE. Even though random forest does not provide a perfect prediction, it provides a pretty accurate predictions, especially if looking at the relative counts in proportion-wise. The model predicts cell which have higher observed fires to have higher predicted fires in comparison to other cells. 
+
+Even though more than 80% of fires occur by lightning, another limitation of our model is it uses variables which represent weather conditions, which might not accurately account for accident-based fires.
+Other variables like distance to road is not suitable to be implemented in the model because our work is based on gridded cells and we do not have one specific ignition point. Therefore, we could not really calculate the distances of each grid cells. An alternative would be to treat distance to road as a dummy variable with a value of 1 if the cell consists of road and 0 otherwise. However, most cells contain roads and it is unlikely to be a useful predictor. Other variables that might be useful for predicting the risk of non-lightning caused fires could be further explored and factored in the model. Additionally, time of day could be added so that users could choose which time of day they want to present in the app, because different time of day might result to different bushfire risk. 
+
+
+# Appendix 
+
+## Data Sources
+
+    SILO
+[`SILO`](https://www.longpaddock.qld.gov.au/silo/) is a database of Australian climate data from 1889 to current hosted by Queensland Department of Environment and Science (DES). It provides daily metereological datasets for a range of climate variables. The datasets are constructed from observational data obtained from the Bureau of Meteorology (BoM) and other suppliers. *more information on how data is constructed [here](https://www.longpaddock.qld.gov.au/silo/about/overview/).
+
+    ERA5 renalysis data
+ERA5 is the fifth generation European Centre for Medium-Range Weather Forecasts (ECMWF) reanlysis for global climate and weather. It also supplies data from 1979 onwards for a whole range of climate and weather data. 
+
+Reanalysis combines model data and observations across the world into a globally complete and consistent dataset using the laws of physics. *[link](https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels-monthly-means?tab=overview)
+
+    Victoria forest data
+Victoria forest vector data delineates Victorian forest types and its attributes referenced through a forest type code. Data can be downloaded from [dicover.data.vic.gov.au](https://discover.data.vic.gov.au/dataset/forest-types-of-victoria).
+
+
+    Surface soil moisture
+BoM's Australian Water Resources Landscale model provides an array of estimates depicting Austrlia's water balance including surface soil moisture, evapotranspiration among others. 
+
+## Fire towers in Victoria
+```{r}
+knitr::include_graphics(here::here("VICfire/data/report/fire_towers.png"))
+```
+[Source](https://www.firelookoutsdownunder.com/Photos/Victoria/fire_towers_and_lookouts.pdf)
+
+

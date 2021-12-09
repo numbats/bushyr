@@ -1,0 +1,1053 @@
+---
+title: "modeling"
+author: "Helen Evangelina"
+date: "29/10/2021"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(zoo)
+library(raster)
+library(sp)
+library(broom)
+library(randomForest)
+library(tidymodels)
+```
+
+```{r}
+data <- read.csv(here::here("VICfire/data/model_df.csv"))
+```
+
+```{r}
+# checking for missing values
+library(visdat)
+vis_miss(data)
+```
+
+```{r}
+# creating a raster for victoria
+vic_raster <- raster(
+  # no. of rows & columns (directly linked to resolution of grid cell)
+  nrows = 20,
+  ncols = 20,
+  
+  # bbox (bounding box of Victoria)
+  xmn = 140.9617,
+  xmx = 149.9763,
+  ymn = -39.13396,
+  ymx = -33.99605,
+  
+  # crs
+  crs = "+proj=longlat +datum=WGS84"
+  )
+vic_raster[] <- 1:ncell(vic_raster)
+# creating the lon & lat for each cell id
+lonlat <- as.data.frame(coordinates(vic_raster)) %>%
+  mutate(id = 1:400)
+```
+
+```{r}
+# joining the data with lat and lon
+data2 <-  data %>%
+  left_join(lonlat, by = "id") 
+```
+
+
+## adding FOR_TYPE
+-- this is not going to be added to the model --
+```{r, eval = FALSE}
+# this is not in the data folder bcs file is too large
+forest <- raster(here::here('data/aus_for18_publish/aus_for18_publish/aus_for18/z001001.adf'))
+
+# project to EPSG:3577
+fire_points <- SpatialPoints(dplyr::select(data2, x, y), proj4string=CRS("+proj=longlat +datum=WGS84")) %>%
+  spTransform(projection(forest))
+
+# extract ID of rectangles
+fire_forest_index <- extract(forest, fire_points)
+
+
+# access attributes in forest 2018
+fire_forest_info <- levels(forest) %>%
+  as.data.frame()
+
+fire_forest_info <- fire_forest_info %>%
+  .[fire_forest_index,] %>%
+  as_tibble()
+
+# join back to the dataset
+for (variable in names(fire_forest_info)){
+  data2[[variable]] <- fire_forest_info[[variable]]
+}
+```
+
+```{r, eval = FALSE}
+# checking for missing values \
+library(visdat)
+data2 %>% vis_miss()
+```
+some of the data in the forest data has missing values (19.9% in total of NAs), which is quite a lot.
+
+```{r, eval = FALSE}
+library(rnaturalearth)
+library(sf)
+library(tmap)
+au_map <- ne_states(country = 'Australia', returnclass = 'sf')
+vic_map <- au_map[7,]
+
+vic_map_sf <- vic_map %>%
+  st_as_sf(coords = c("lon", "lat"))
+
+data2_NA <- data2 %>%
+  mutate(value = case_when(!is.na(FOREST) ~ 1,
+                           is.na(FOREST) ~ 0)) %>%
+  dplyr::select(x, y, value)
+
+NA_raster <- rasterFromXYZ(data2_NA)
+
+tm_shape(NA_raster$value) +
+  tm_raster(style = "cont", 
+            palette = "div",
+                 # n = 5, # no. of colours 
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+The missing values are on the boundaries of Victoria. Therefore, we can remove these values.
+
+```{r, eval = FALSE}
+# filtering out the NA values
+data2 <- data2 %>%
+  filter(!is.na(FOREST))
+```
+
+## creating lags
+-- since we have monthly data, we can create a 2 months, 3 months, 6 months and a year lag.
+2months -> average rainfall in the last 2 months
+
+### for rain
+```{r}
+data_lagged <- data2 %>%
+  arrange(id) %>%
+  group_by(id) %>%
+  mutate(rain2 = rollsumr(daily_rain, k = 2, fill = NA)/2,
+         rain3 = rollsumr(daily_rain, k = 3, fill = NA)/3)
+```
+putting it into the model, rain3 and rain6 are not significant? but why after adding rain12, rain6 and rain12 become significant.
+
+### for et
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(et_short_crop2 = rollsumr(et_short_crop, k = 2, fill = NA)/2,
+         et_short_crop3 = rollsumr(et_short_crop, k = 3, fill = NA)/3)
+```
+
+### for max_temp
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(max_temp2 = rollsumr(max_temp, k = 2, fill = NA)/2,
+         max_temp3 = rollsumr(max_temp, k = 3, fill = NA)/3)
+```
+
+### radiation
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(radiation2 = rollsumr(radiation, k = 2, fill = NA)/2,
+         radiation3 = rollsumr(radiation, k = 3, fill = NA)/3)
+```
+
+### rh
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(rh2 = rollsumr(rh, k = 2, fill = NA)/2,
+         rh3 = rollsumr(rh, k = 3, fill = NA)/3)
+```
+
+### si10
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(si102 = rollsumr(si10, k = 2, fill = NA)/2,
+         si103 = rollsumr(si10, k = 3, fill = NA)/3)
+```
+
+### lai_hv
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(lai_hv2 = rollsumr(lai_hv, k = 2, fill = NA)/2,
+         lai_hv3 = rollsumr(lai_hv, k = 3, fill = NA)/3)
+```
+
+### lai_lv
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(lai_lv2 = rollsumr(lai_lv, k = 2, fill = NA)/2,
+         lai_lv3 = rollsumr(lai_lv, k = 3, fill = NA)/3)
+```
+
+### s0_pct
+```{r}
+data_lagged <- data_lagged %>%
+  group_by(id) %>%
+  mutate(s0_pct2 = rollsumr(s0_pct, k = 2, fill = NA)/2,
+         s0_pct3 = rollsumr(s0_pct, k = 3, fill = NA)/3)
+```
+
+
+## modeling
+### simple linear model
+```{r}
+# using count as the response
+lm <- lm(fire_count ~ .-id - year, data = data)
+summary(lm)
+```
+
+```{r}
+# using log scale of count as the response
+lm_log <- lm(log(fire_count+1) ~ .-id - year, data = data)
+summary(lm_log)
+```
+
+```{r}
+# using the added lag variables
+linearmodel <- lm(log(fire_count+1) ~ .-id -x -y-year, data = data_lagged, na.action= na.exclude)
+summary(linearmodel)
+```
+R-squared: 14.51% - not a good model
+
+### linear model with only significant variables
+```{r}
+linearmodel2 <- lm(log(fire_count+1) ~ month +et_short_crop + radiation + si10 + lai_lv + forest + rain2 +et_short_crop2 + et_short_crop3 + max_temp2 + max_temp3 + radiation2+ rh2 +si102 + si103 +  lai_hv2 + lai_hv3 + lai_lv2 + lai_lv3, data = data_lagged, na.action = na.exclude)
+summary(linearmodel2)
+```
+Ajd R-squared: 14.27%
+
+```{r}
+anova(linearmodel, linearmodel2)
+```
+If p-value > 0.05, do not rejetc null hypothesis that the smaller model is true --> smaller model is better. 
+- linearmodel is better than linearmodel2
+
+### checking if the variables are linear
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = daily_rain)) +
+  geom_jitter() +
+  geom_smooth()
+```
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = rh)) +
+  geom_jitter() +
+  geom_smooth()
+```
+
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = max_temp)) +
+  geom_jitter() +
+  geom_smooth()
+```
+
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = radiation)) +
+  geom_jitter() +
+  geom_smooth()
+```
+```{r}
+data_lagged %>%
+  ggplot(aes(y = fire_count,
+             x = lai_hv)) +
+  geom_jitter() +
+  geom_smooth()
+```
+
+### glm 
+```{r}
+glm <- glm(fire_count ~ . -id -x -y -year, data = data_lagged, family = poisson())
+summary(glm)
+```
+- comparing with normal lm model:
+```{r}
+lm2 <- glm(fire_count ~ . -id -x -y -year, data = data_lagged, family = "gaussian")
+summary(lm2)
+```
+
+both models have high deviance which indicates that the two models are not really a good model. But lm has way higher deviance, which means glm is better?
+
+- plotting the model:
+```{r}
+augment_lm <- augment(lm2)
+ggplot(lm2, aes(x = .fitted,
+             y = .resid)) + 
+  geom_point() +
+  geom_smooth()
+
+augment_glm <- augment(glm)
+ggplot(augment_glm, aes(x = .fitted,
+             y = .resid)) + 
+  geom_point() +
+  geom_smooth()
+```
+
+### Random Forest 
+RF does not work with NAs. With NAs, rf will omit the NAs or impute the values. imputing the values wont work in this case. 
+
+#### with lagged variables
+-- month as factor?
+```{r}
+# omitting the NAs
+data_lagged_omitted <- data_lagged %>% na.omit() %>%
+  mutate(month = as.factor(month))
+
+set.seed(2021)
+rand1 <- randomForest(fire_count ~ .-year -id, data = data_lagged_omitted, importance = TRUE, mtry = 6, ntree = 500) 
+rand1$predicted
+```
+MSE looks good?
+MSE: 0.161
+% var explaned: 41.08%
+
+
+#### predicted values
+the predicted values of our random forest model would be based on the average fitted values.
+
+
+
+```{r}
+predicted_values <- as.data.frame(rand1$predicted) %>% rename(`pred` = `rand1$predicted`)
+predicted_data <- data_lagged_omitted %>% 
+  bind_cols(predicted_values)
+```
+
+```{r}
+dataframe <- data.frame(id = 1:400) 
+
+pred_oct <- predicted_data %>% 
+  dplyr::filter(month == 10) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_oct <- dataframe %>%
+  left_join(pred_oct) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_nov <- predicted_data %>% 
+  dplyr::filter(month == 11) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_nov <- dataframe %>%
+  left_join(pred_nov) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_dec <- predicted_data %>% 
+  dplyr::filter(month == 12) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_dec <- dataframe %>%
+  left_join(pred_dec) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_jan <- predicted_data %>% 
+  dplyr::filter(month == 1) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_jan <- dataframe %>%
+  left_join(pred_jan) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_feb <- predicted_data %>% 
+  dplyr::filter(month == 2) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_feb <- dataframe %>%
+  left_join(pred_dec) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+pred_mar <- predicted_data %>% 
+  dplyr::filter(month == 3) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred)) %>%
+  mutate(count = exp(pred_risk))
+
+data_mar <- dataframe %>%
+  left_join(pred_mar) %>%
+  dplyr::select(id, count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+```
+
+```{r}
+write.csv(data_mar, here::here("VICfire/data/pred_march.csv"))
+```
+
+
+predicted counts are mostly 0? is this good?
+
+```{r}
+pred_mar
+```
+
+
+```{r}
+importance(rand1)
+varImpPlot(rand1)
+```
+
+## trying with a random forest model for each cell id
+```{r}
+data_lagged_171 <- data_lagged_omitted %>%
+  filter(id == 171) %>%
+  dplyr::select(-year, -x, -y)
+set.seed(2021)
+rf171 <- randomForest(log(fire_count+1) ~ .-id, data = data_lagged_171, importance = TRUE, mtry = 6, ntree = 500) 
+pred171 <- rf171$predicted
+
+typeof(rf171)
+
+exp(pred171)
+```
+This makes much more sense.
+
+```{r}
+final_data <- data_lagged_omitted %>% 
+  dplyr::select(-year, -x, -y)
+
+no_of_id <- unique(data_lagged_omitted$id)
+
+# making predictions
+# without log scale
+set.seed(2021)
+pred_values <- vector()
+for (i in 1:length(no_of_id)) {
+  data <- final_data %>% filter(id == no_of_id[i])
+  rfmodel <-  randomForest(fire_count ~ .-id, data = data, importance = TRUE, mtry = 6, ntree = 500) 
+  predicted_values <- rfmodel$predicted 
+  for (j in 1:length(predicted_values)) {
+  pred_values <- append(pred_values, predicted_values[j])
+  }
+}
+pred_count <- as.data.frame(pred_values) 
+final_data <- final_data %>%
+  bind_cols(pred_count)
+         
+comparison <- final_data %>% 
+  dplyr::select(id, month, pred_values, fire_count)
+
+# calculating MSE
+mean((comparison$fire_count - comparison$pred_values)^2)
+
+# creating scatter plot
+ggplot(comparison, aes(x = fire_count,
+                       y = pred_values)) +
+  geom_point()
+```
+MSE of 2.4703
+
+## RF with log scale
+```{r}
+final_data2 <- data_lagged_omitted %>% 
+  dplyr::select(-year)
+
+# making predictions
+# with log scale
+set.seed(2021)
+pred_values2 <- vector()
+for (i in 1:length(no_of_id)) {
+  data2 <- final_data2 %>% filter(id == no_of_id[i])
+  rfmodel2 <-  randomForest(log(fire_count+1) ~ .-id, data = data2, importance = TRUE, mtry = 6, ntree = 500) 
+  predicted_values2 <- rfmodel2$predicted 
+  for (j in 1:length(predicted_values)) {
+  pred_values2 <- append(pred_values2, predicted_values2[j])
+  }
+}
+pred_count2 <- tibble(pred_values = (exp(pred_values2)-1)) 
+final_data2 <- final_data2 %>%
+  bind_cols(pred_count2)
+         
+comparison2 <- final_data2 %>% 
+  dplyr::select(id, month, pred_values, fire_count)
+
+# calculating MSE
+mean((comparison2$fire_count - comparison2$pred_values)^2)
+
+# creating scatter plot
+ggplot(comparison2, aes(x = fire_count,
+                       y = pred_values)) +
+  geom_point()
+```
+MSE = 2.51
+
+```{r}
+dataframe <- data.frame(id = 1:400) 
+
+pred_oct_final <- final_data %>% 
+  dplyr::filter(month == 10) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_oct_final <- dataframe %>%
+  left_join(pred_oct_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0)) 
+
+data_oct_final <- data_oct_final %>% left_join(lonlat)
+
+pred_nov_final <-final_data %>% 
+  dplyr::filter(month == 11) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_nov_final <- dataframe %>%
+  left_join(pred_nov_final) %>%
+  dplyr::select(id,pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_nov_final <- data_nov_final %>% left_join(lonlat)
+
+pred_dec_final <- final_data %>% 
+  dplyr::filter(month == 12) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_dec_final <- dataframe %>%
+  left_join(pred_dec_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_dec_final <- data_dec_final %>% left_join(lonlat)
+
+pred_jan_final <- final_data %>% 
+  dplyr::filter(month == 1) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_jan_final <- dataframe %>%
+  left_join(pred_jan_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_jan_final <- data_jan_final %>% left_join(lonlat)
+
+pred_feb_final <- final_data %>% 
+  dplyr::filter(month == 2) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_feb_final <- dataframe %>%
+  left_join(pred_feb_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_feb_final <- data_feb_final %>% left_join(lonlat)
+
+pred_mar_final <- final_data %>% 
+  dplyr::filter(month == 3) %>%
+  group_by(id) %>%
+  summarise(pred_risk = mean(pred_values))
+
+data_mar_final <- dataframe %>%
+  left_join(pred_mar_final) %>%
+  dplyr::select(id, pred_risk) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+data_mar_final <- data_mar_final %>% left_join(lonlat) 
+```
+
+```{r}
+library(rnaturalearth)
+library(sf)
+library(tmap)
+au_map <- ne_states(country = 'Australia', returnclass = 'sf')
+vic_map <- au_map[7,]
+
+vic_map_sf <- vic_map %>%
+  st_as_sf(coords = c("lon", "lat"))
+```
+
+# october
+```{r}
+data_oct_final <- data_oct_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_oct_final) = c("x", "y")
+oct_raster <- rasterFromXYZ(data_oct_final)
+
+tm_shape(oct_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+oct_data <- final_data %>%
+  filter(month == 10) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+oct_data <- dataframe %>%
+  left_join(oct_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+oct_data <- oct_data %>% left_join(lonlat)
+
+oct_data <- oct_data %>% 
+   dplyr::select(-id)
+
+coordinates(oct_data) = c("x", "y")
+oct_raster_actual <- rasterFromXYZ(oct_data)
+
+tm_shape(oct_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+
+# noovember
+```{r}
+data_nov_final <- data_nov_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_nov_final) = c("x", "y")
+nov_raster <- rasterFromXYZ(data_nov_final)
+
+tm_shape(nov_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+nov_data <- final_data %>%
+  filter(month == 11) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+nov_data <- dataframe %>%
+  left_join(nov_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+nov_data <- nov_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(nov_data) = c("x", "y")
+nov_raster_actual <- rasterFromXYZ(nov_data)
+
+tm_shape(nov_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+# december
+```{r}
+data_dec_final <- data_dec_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_dec_final) = c("x", "y")
+dec_raster <- rasterFromXYZ(data_dec_final)
+
+tm_shape(dec_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+dec_data <- final_data %>%
+  filter(month == 12) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+dec_data <- dataframe %>%
+  left_join(dec_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+dec_data <- dec_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(dec_data) = c("x", "y")
+dec_raster_actual <- rasterFromXYZ(dec_data)
+
+tm_shape(dec_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+# january
+```{r}
+data_jan_final <- data_jan_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_jan_final) = c("x", "y")
+jan_raster <- rasterFromXYZ(data_jan_final)
+
+tm_shape(jan_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+jan_data <- final_data %>%
+  filter(month == 1) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+jan_data <- dataframe %>%
+  left_join(jan_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+jan_data <- jan_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(jan_data) = c("x", "y")
+jan_raster_actual <- rasterFromXYZ(jan_data)
+
+tm_shape(jan_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+# february
+```{r}
+data_feb_final <- data_feb_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_feb_final) = c("x", "y")
+feb_raster <- rasterFromXYZ(data_feb_final)
+
+tm_shape(feb_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+feb_data <- final_data %>%
+  filter(month ==2) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+feb_data <- dataframe %>%
+  left_join(feb_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+feb_data <- feb_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(feb_data) = c("x", "y")
+feb_raster_actual <- rasterFromXYZ(feb_data)
+
+tm_shape(feb_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+# march
+```{r}
+data_mar_final <- data_mar_final %>% 
+   dplyr::select(-id)
+
+coordinates(data_mar_final) = c("x", "y")
+mar_raster <- rasterFromXYZ(data_mar_final)
+library(tmap)
+tm_shape(mar_raster) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+## comparing with actual counts
+```{r}
+mar_data <- final_data %>%
+  filter(month == 3) %>%
+  group_by(id) %>%
+  summarise(count = mean(fire_count))
+
+mar_data <- dataframe %>%
+  left_join(mar_data) %>%
+  dplyr::select(id,count) %>%
+  mutate_all(~replace(., is.na(.), 0))
+
+mar_data <- mar_data %>% left_join(lonlat) %>%
+   dplyr::select(-id)
+
+coordinates(mar_data) = c("x", "y")
+mar_raster_actual <- rasterFromXYZ(mar_data)
+
+tm_shape(mar_raster_actual) +
+  tm_raster(style = "cont", 
+            palette = "seq",
+                  alpha = 0.4) +
+  tm_shape(vic_map_sf) +
+  tmap::tm_borders(lwd = 3)
+```
+
+# correlation between variables
+```{r}
+library(GGally)
+data2 <- data_lagged_omitted %>%
+  ungroup() %>%
+  dplyr::select(-id, -x, -y, -year) 
+ggcorr(data2, label = T)
+```
+ a lot of variables are highly correlated.
+
+```{r}
+# splitting the data
+data_split <- initial_split(data_lagged_omitted, prop = 0.7)
+data_train <- training(data_split)
+data_test <- testing(data_split)
+
+
+data2 <- data_lagged_omitted %>% ungroup() %>% dplyr::select(-id, -x, -y, -year) %>% 
+  mutate(month = as.factor(month))
+
+set.seed(2021)
+rfmodel1 <- randomForest(fire_count ~ ., data = data2, importance = TRUE) 
+rfmodel1
+```
+-- based on https://algotech.netlify.app/blog/interpreting-black-box-regression-model-with-lime/ -- 
+```{r}
+# predicting
+predicted <- predict(rfmodel1, data2, type = "response")
+
+# Function for evaluating model
+eval_recap <- function(truth, estimate){
+  
+  df_new <- data.frame(truth = truth,
+                       estimate = estimate)
+  
+  data.frame(RMSE = rmse_vec(truth, estimate),
+             MAE = mae_vec(truth, estimate),
+             "R-Square" = rsq_vec(truth, estimate),
+             check.names = F
+             ) %>% 
+    mutate(MSE = sqrt(RMSE))
+}
+
+eval_recap(truth = data2$fire_count,
+           estimate = predicted)
+```
+
+```{r}
+set.seed(2021)
+
+explainer <- lime(x = data2,
+                  model = rfmodel1) 
+```
+
+```{r}
+# dealing with model_type error
+model_type.randomForest <- function(x){
+  return("regression") # for regression problem
+}
+
+predict_model.randomForest <- function(x, newdata, type = "response") {
+
+    # return prediction value
+    predict(x, newdata) %>% as.data.frame()
+    
+}
+
+# sampling data
+data_low <- data2 %>% filter(fire_count < 5)
+data_high <- data2 %>% filter(fire_count>5)
+
+set.seed(2021)
+lime_sample1 <- sample(1:length(data_low),4)
+lime_sample2 <- sample(1:length(data_high),4)
+
+data_selected1 <- data_low[lime_sample1, ]
+data_selected2 <- data_high[lime_sample2, ]
+data_selected <- data_selected1 %>% bind_rows(data_selected2) %>%
+  dplyr::select(-fire_count)
+explanation <- explain(x = data_selected,
+                       explainer = explainer, 
+                       feature_select = "auto",
+                       n_features = 15)
+
+explanation1 <- explanation %>% filter(case %in% c(1,2,3,4)) 
+explanation2 <- explanation %>% filter(case %in% c(5,6,7,8)) 
+```
+
+```{r}
+plot_features(explanation1)
+```
+important: max_temp, lai_hv2, si103, daily_rain, lai_hv, lai_hv3, 
+month, si10, rh, lai_lv, s0_pct3, radiation3, et_Short_crop, s0_pct, radiation, lai_lv2, lai_hv2, 
+
+```{r}
+plot_features(explanation2)
+```
+important: forest, month, si10, si102, s0_pct, si103, max_temp, radiation3, s0_pct2, radiation, daily_rain, so_pct3, rh, lai_hv2, st_short_crop, lai_hv3, lai_hv, lai_Lv,rh2,
+
+## fitting modl based on these variables
+```{r}
+set.seed(2021)
+rfmodel2 <- randomForest(fire_count ~ forest + month + si10 + si102 + s0_pct + si103 + max_temp + radiation3 + s0_pct2 + radiation + daily_rain + s0_pct3 + rh + lai_hv2 + et_short_crop + lai_hv3 + lai_hv + lai_lv + rh2, data = data2, importance = TRUE) 
+rfmodel2
+```
+using all variables is better.
+
+# parameter tuning
+
+```{r}
+plot(rfmodel1)
+```
+Error rate stabilises around 100 trees but keep decreasing slowly until around 300 trees. 
+
+```{r}
+which.min(rfmodel1$mse)
+```
+483 gives the lowest MSE.
+
+
+```{r}
+# splitting the data
+data_split <- initial_split(data_lagged_omitted, prop = 0.7)
+data_train <- training(data_split)
+data_test <- testing(data_split)
+
+set.seed(2021)
+rand1 <- randomForest(fire_count ~ .-year -id -x -y, data = data_lagged_omitted, importance = TRUE) 
+rand1
+```
+
+```{r}
+x <- data2 %>% dplyr::select(-fire_count)
+
+mtry <- tuneRF(x, data2$fire_count, ntreeTry=483,
+               stepFactor=1.5,improve=0.001, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(best.m)
+```
+9 gives the lowest error - 2.14
+
+```{r}
+
+set.seed(2021)
+rfmodel3 <- randomForest(fire_count ~ ., data = data2, importance = TRUE, ntree = 483, mtry = 9) 
+rfmodel3
+```
+ a bit better!
+
+
+
+--- with important variables ---- 
+```{r}
+
+set.seed(2021)
+rand2 <- randomForest(log(fire_count+1) ~ x + y + radiation + month + daily_rain + rain3 + et_short_crop + s0_pct + s0_pct3 + s0_pct2+ rh + max_temp + rh3 + et_short_crop2 + et_short_crop3 + rain2 + si10 + max_temp2 + radiation2 + radiation3 + si103 + max_temp2 + lai_lv3, data = data_lagged_omitted, importance = TRUE, mtry = 6) 
+rand2
+```
+41.36%
+MSR 0.1611
+
+the rf model with only the top important variables is slightly better than rf model using all of the variables. 
+
+forest surprisingly isnt significant?
+
+#### without lagged variables
+```{r}
+data_omitted <- data2 %>% na.omit()
+rand_ori <- randomForest(log(fire_count+1) ~ . -id -year, data = data_omitted, importance = TRUE, mtry = 5) 
+rand_ori
+```
+better than using the lagged data?
+% var explained: 40.8%, MSR: 0.155
+
+should we look at MSR or % var explained?
+
+```{r}
+importance(rand_ori)
+varImpPlot(rand_ori)
+```
+```{r}
+library(caret)
+
+x <- data_omitted %>% dplyr::select(-fire_count)
+y <- data_omitted$fire_count
+
+tuneRF(x, y)
+```
+
+```{r}
+x2 <- data_lagged_omitted %>% dplyr::select(-fire_count)
+y2 <- data_lagged_omitted$fire_count
+
+tuneRF(x2, y2)
+```
+
+## writing the data to csv files
+```{r}
+# the lag data
+write.csv(data_lagged, here::here("VICfire/data/final_data_lag.csv"))
+
+# the non-lag data
+write.csv(data2, here::here("VICfire/data/final_data.csv"))
+```
+

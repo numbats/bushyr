@@ -1,0 +1,10 @@
+﻿The column names in a Shape file are limited to 10 characters
+This lists the short column name and the original column name in the database table
+-----------------------------------------------------------------------------------------------------
+
+CODE = CODE
+ELEVATION = ELEVATION
+LAND_AWS55 = LAND_AWS55
+STATION_ID = STATION_ID
+DATETIME = DATETIME
+NAME = NAME

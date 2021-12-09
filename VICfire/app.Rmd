@@ -1,0 +1,1371 @@
+---
+title: "app_temp"
+author: "Brenwin"
+date: "04/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# --- load libraries
+library(tidyverse)
+library(leaflet)
+library(ranger)
+library(sf)
+library(raster)
+```
+
+# --- read in data
+```{r, eval=FALSE}
+load(here::here("data/eda.RData"))
+load(here::here("data/ida.RData"))
+model <- readRDS(here::here("data/rfmodel_final.rds"))
+```
+
+```{r}
+# ========== Victoria map (sfdf MULTIPOLYGON) ==========
+vic_map_sf <- ozmaps::ozmap_states %>% 
+  filter(NAME == "Victoria")
+
+# --- project crs
+vic_map_sf <- sf::st_transform(vic_map_sf,
+                               crs = 4326)
+
+# ========== `vic_raster` ==========
+
+# --- create `vic_raster` object *to be toggled
+vic_raster <- raster::brick(
+  # no. of rows & columns (directly linked to resolution of grid cell)
+  nrows = 20,
+  ncols = 20,
+  
+  # bbox (bounding box of Victoria)
+  xmn = 140.9617,
+  xmx = 149.9763,
+  ymn = -39.13396,
+  ymx = -33.99605,
+  
+  # crs
+  crs = 4326,
+  
+  # set `raster` values (rowwise)
+  # vals = seq(from = 1, to = 400000, by = 1000) 
+  )
+
+# --- set values (`id` each cell)
+vic_raster <- vic_raster %>% 
+  raster::setValues(values = seq(from = 1, to = 400, by = 1))
+
+# --- mask raster; to only Victorian map 
+
+# change vic_map_sf to `sp` object 
+# *`raster` package; NOT compatible with `sf` yet; so; need; change to `sp` 
+vic_map_sp <- as(vic_map_sf, 
+                 Class = "Spatial")
+
+# mask (*think: crop to polygon shape) raster; to only Victorian map (`vic_map_sp`)
+vic_raster_crop <- vic_raster %>% 
+  raster::mask(mask = vic_map_sp)
+
+# convert `raster` -> `spdf` -> `sf`; to conduct spatial join
+vic_raster_crop_sf <- vic_raster_crop %>%
+  setValues(1:400) %>% # set id values *values required to convert to `spdf`
+  as(., "SpatialPolygonsDataFrame") %>% 
+  sf::st_as_sf() %>% 
+  rename(id = layer) # rename `layer` to `id` 
+```
+
+
+```{r, eval=FALSE}
+# --- get cells NOT in Victoria as NA
+vic_raster_crop_values <- vic_raster_crop %>% 
+  as.data.frame() %>% 
+  as_tibble() %>%
+  # NA where cell is not in Vic
+  mutate(id_vic = layer,
+         .keep = "unused") %>% 
+  # id column; for joining
+  mutate(id = 1:400,
+         .before = "id_vic") %>% 
+  mutate(id = factor(id))
+
+# --- join with `id_vic`; where cell = NA; if not in Vic 
+model_df3 <- full_join(model_df3, vic_raster_crop_values,
+                       by = "id") %>% 
+  relocate(id_vic,
+           .after = "id")
+```
+
+198 cells are within Victoria
+202 cells are NOT within Victoria
+
+# === Bushfire Information app 
+
+# --- create the map with `leaflet`
+```{r}
+base_map <- leaflet(options = leafletOptions(
+  # set min & max zoom
+  minZoom = 6.45,
+  maxZoom = 11
+)) %>% 
+  addProviderTiles(provider = "OpenStreetMap",
+                   group = "OSM") %>%
+  addProviderTiles(provider = "CartoDB",
+                   group = "Carto") %>% 
+  # set Victoria bounding box 
+  leaflet::fitBounds(lng1 = 140.9617,
+                     lng2 = 149.9763,
+                     lat1 = -39.13396,
+                     lat2 = -33.99605) %>% 
+  # set max bounds of map
+  # disable dragging map; too far out of bounds
+  setMaxBounds(lng1 = 140.9617 - 0.4,
+               lng2 = 149.9763 + 0.4,
+               lat1 = -39.13396 - 0.4,
+               lat2 = -33.99605 + 0.4) 
+
+# --- palette for polygon data
+pal <- leaflet::colorNumeric(palette = "YlOrRd", 
+                             domain = c(1:50), # scale
+                             reverse = F)
+
+# --- create df for each bushfire season for circle marker groups 
+bf_season_2016_2017_df <- cluster_16_21_sf %>% 
+  filter(bf_season == "2016-2017")
+
+bf_season_2017_2018_df <- cluster_16_21_sf %>% 
+  filter(bf_season == "2017-2018")
+
+bf_season_2018_2019_df <- cluster_16_21_sf %>% 
+  filter(bf_season == "2018-2019")
+
+bf_season_2019_2020_df <- cluster_16_21_sf %>% 
+  filter(bf_season == "2019-2020")
+
+bf_season_2020_2021_df <- cluster_16_21_sf %>% 
+  filter(bf_season == "2020-2021")
+
+
+base_map %>% 
+  addPolylines(data = vic_map_sf,
+               color = "black",
+               weight = 3) %>% 
+  # --- add gridded cell
+  addPolygons(data = ignition_rasterize_cluster_bf_season %>% filter(bf_season == "2018-2019"),
+              opacity = 0.05,
+              fillOpacity = 0.5,
+              color = ~pal(fire_count), # fill by `fire_count`; using above palette
+              popup = "<h3 style='font-size:5; color:#1E90FF'>hi loser</h3>") %>% # click pop-up texts
+  
+  # --- add circle markers; each `bf_season` as a layer
+  # 2016-2017
+  addCircleMarkers(data = bf_season_2016_2017_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2016-2017") %>% 
+  # 2017-2018
+  addCircleMarkers(data = bf_season_2017_2018_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2017-2018") %>% 
+  # 2018-2019
+  addCircleMarkers(data = bf_season_2018_2019_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2018-2019") %>% 
+  # 2019-2020
+  addCircleMarkers(data = bf_season_2019_2020_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2019-2020") %>% 
+  # 2020-2021
+  addCircleMarkers(data = bf_season_2018_2019_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2020-2021") %>% 
+  # add user controls; for overlay groups
+  addLayersControl(baseGroups = c("OSM", "Carto"),
+                   overlayGroups = c("2016-2017", "2017-2018", "2018-2019", "2019-2020", "2020-2021"),
+                   options = layersControlOptions(collapsed = FALSE)) %>% 
+  # uncheck groups
+  hideGroup(c("2017-2018", "2018-2019", "2019-2020", "2020-2021")) %>% 
+  # add & customise legend
+  addLegend(pal = pal,
+            values = c(1:50),
+            title = "ignition counts",
+            position = "bottomright") %>% 
+  
+  # add Reset button
+  leaflet.extras::addResetMapButton()
+```
+
+# --- plots to show at the bottom of the app
+```{r}
+# --- fire ignitions plot
+model_df3 %>% 
+  ggplot() +
+  geom_col(aes(x = bf_season,
+               y = fire_count)) +
+  theme_bw()
+```
+
+```{r}
+p <- model_df3 %>% 
+  filter(id == 274) %>% 
+  ggplot() +
+  geom_col(aes(x = bf_season,
+               y = fire_count)) +
+  theme_bw()
+  
+plotly::ggplotly(p)
+
+model_df3 %>% 
+  filter(id == 2) %>% 
+  group_by(bf_season) %>% 
+  summarise(fire_count = sum(fire_count)) %>% 
+  plotly::plot_ly(x = ~bf_season,
+                  y = ~fire_count,
+                  type = "bar",
+                  text = ~fire_count,
+                  textposition = "auto",
+                  hovertemplate = paste("bushfire season: %{x}",
+                                        "<br>fire ignitions: %{y}")) %>% 
+  plotly::layout(
+    # plot title
+    title = "number of fires in bushfire season",
+    
+    # x-axis
+    xaxis = list(type = "category", # categorical variable
+                 title = "bushfire season"), # axis title
+    
+    # y-axis
+    yaxis = list(title = "number of fire ignitions",
+                 type = "numeric",
+                 range = c(0, 40))
+  )
+```
+
+```{r}
+model_df3 %>% 
+  filter(id == 274) %>% 
+  group_by(bf_season,
+           month) %>% 
+  summarise(fire_count = sum(fire_count, na.rm = T)) %>% 
+  pivot_wider(names_from = month,
+              values_from = fire_count) %>% 
+  plot_ly() %>% 
+  # October
+  add_trace(x = ~bf_season,
+            y = ~`10`,
+            name = "Oct",
+            text = ~`10`,
+            textposition = "outside",
+            hovertemplate = paste("bushfire season: %{x}",
+                                  "<br>month: Oct",
+                                  "<br>fire ignitions: %{y}")) %>% 
+  add_trace(x = ~bf_season,
+            y = ~`11`,
+            name = "Nov",
+            text = ~`11`,
+            textposition = "outside",
+            hovertemplate = paste("bushfire season: %{x}",
+                                  "<br>month: Nov",
+                                  "<br>fire ignitions: %{y}")) %>% 
+  add_trace(x = ~bf_season,
+            y = ~`12`,
+            name = "Dec",
+            text = ~`12`,
+            textposition = "outside",
+            hovertemplate = paste("bushfire season: %{x}",
+                                  "<br>month: Dec",
+                                  "<br>fire ignitions: %{y}")) %>% 
+  add_trace(x = ~bf_season,
+            y = ~`1`,
+            name = "Jan",
+            text = ~`1`,
+            textposition = "outside",
+            hovertemplate = paste("bushfire season: %{x}",
+                                  "<br>month: Jan",
+                                  "<br>fire ignitions: %{y}")) %>% 
+  add_trace(x = ~bf_season,
+            y = ~`2`,
+            name = "Feb",
+            text = ~`2`,
+            textposition = "outside",
+            hovertemplate = paste("bushfire season: %{x}",
+                                  "<br>month: Feb",
+                                  "<br>fire ignitions: %{y}")) %>% 
+  add_trace(x = ~bf_season,
+            y = ~`3`,
+            name = "Mar",
+            text = ~`3`,
+            textposition = "outside",
+            hovertemplate = paste("bushfire season: %{x}",
+                                  "<br>month: Mar",
+                                  "<br> fire ignitions: %{y}")) %>% 
+  plotly::layout(barmode = "group",
+                 title = "fire ignitions against months in bushfire season",
+                 yaxis = list(title = "number of ignitions"),
+                 xaxis = list(title = "bushfire season | months"),
+                 bargap = 0.05,
+                 bargroupgap = 0.25)
+```
+
+```{r}
+# --- DT::datatable
+model_df3 %>% 
+  filter(id == 1) %>% 
+  DT::datatable(options = list(scrollX = T,
+                               pageLength = 5,
+                               dom = "Bfrtip", # add dom options 
+                               buttons = c("csv", "excel")), # include `csv` & `excel` buttons 
+                extensions = "Buttons") %>% # add buttons
+  DT::formatRound(columns = 6:33,
+                  digits = 3)
+```
+
+
+```{r}
+model_df3 %>% 
+  filter(id == 2) %>% 
+  # extract date
+  mutate(date = paste(year, month, sep = "") %>% lubridate::ym(),
+         .after = "month") %>% 
+  plot_ly(x = ~date,
+          y = ~max_temp,
+          split = ~bf_season,
+          type = "scatter",
+          mode = "lines+markers",
+          hovertemplate = paste("bushfire season = %{x|%b}", # show month
+                                "<br>max temperature: %{y:.2f}")) %>% # value in 2d.p.
+  plotly::layout(title = "max temperature over bushfire season", # title
+                 # set tick labels
+                 xaxis = list(tickformat = "%Y",
+                              ticklabelmode = "period",
+                              dtick = "M12"), # every 12 months
+                 # legend
+                 legend = list(title = list(text = "bushfire_season"))
+                 ) 
+```
+
+# === for Bushfire Risk Predictions app
+
+## load model
+```{r}
+# --- `rf` model object
+model <- readRDS(here::here("data/rfmodel_final.rds"))
+```
+
+
+## example of mean & sd of each variable
+```{r scale_max_temp_eg}
+model_df2 %>% 
+  select(max_temp) %>% 
+  mutate(max_temp = scale(max_temp)) %>%
+  summarise(mean_max_temp = mean(max_temp,
+                                 na.rm = T),
+            sd_max_temp = sd(max_temp,
+                             na.rm = T))
+
+model_df2 %>% 
+  na.omit() %>% 
+  select(max_temp) %>% 
+  # mutate(max_temp = scale(max_temp)) %>%
+  summarise(mean = mean(max_temp),
+            sd = sd(max_temp))
+
+tibble(x = seq(0, 10, length.out = 100)) %>% 
+  mutate(y = dnorm(x)) %>% 
+  mutate(percent = c(1:100)) %>% 
+  ggplot() +
+  geom_line(aes(x = x,
+                y = y)) +
+  geom_vline(xintercept = 2.649311e-16) +
+  theme_bw()
+```
+
+## include `id_vic` to `model_df3`; find which cells are NA; 
+
+```{r}
+# --- ensure `vic_map_sf` & `vic_raster_crop_sf`; same crs
+vic_map_sf <- vic_map_sf %>% 
+  sf::st_transform(crs = st_crs(vic_raster_crop_sf)) 
+  
+vic_cell_intersect <- st_join(vic_raster_crop_sf,
+                              vic_map_sf) 
+
+# --- all cell ID within Victoria
+id_vic <- vic_cell_intersect %>% 
+  as_tibble() %>% 
+  filter(!is.na(NAME)) %>%
+  pull(id)
+
+model_df2 %>% 
+  filter(id %in% id_vic)
+
+model_df2 %>% 
+  na.omit() %>% 
+  filter(id %in% id_vic)
+  
+tmap_mode("view")
+tm_shape(vic_raster_crop_sf) +
+  tm_polygons() +
+  tm_shape(vic_map_sf) +
+  tm_borders(lwd = 3)  
+```
+
+## Make predictions + map 
+```{r}
+model_df_pred <- model_df2 %>% 
+  na.omit() %>% 
+  ungroup() %>% 
+  # allow users: choose month
+  filter(month == 12) %>% 
+  # make predictions
+  mutate(pred = predict(model, .)$predictions,
+         .after = "fire_count") %>% 
+  group_by(id) %>% 
+  summarise(avg_pred = mean(pred)) %>% 
+  ungroup() %>% 
+  mutate(total = sum(avg_pred)) %>% 
+  mutate(avg_pred_prop = avg_pred / total,
+         .after = "avg_pred") 
+
+# extract `id` & `geometry` column (i.e. polygon for each grid cell)
+model_df_pred <- ignition_rasterize_cluster_sf_month %>% 
+  as_tibble() %>% 
+  distinct(id,
+           .keep_all = T) %>% 
+  select(id, geometry) %>% 
+  mutate(id = as_factor(id)) %>% # ensure; same data type
+  sf::st_as_sf() %>% 
+  # join with predicted data
+  left_join(., model_df_pred)
+  
+
+model_df_pred %>% 
+  tm_shape(.) +
+  tm_polygons(col = "avg_pred_prop") +
+  tm_shape(vic_map_sf) +
+  tm_borders(lwd = 3)
+```
+
+```{r}
+pal_intervals <- classInt::classIntervals(model_df_pred$avg_pred_prop,
+                                          n = 5,
+                                          style = "pretty") 
+```
+
+
+```{r}
+# --- create base map
+base_map <- leaflet(options = leafletOptions(
+  # set min & max zoom
+  minZoom = 6.45,
+  maxZoom = 11
+)) %>%
+  # add provider Tiles
+  addProviderTiles(provider = "OpenStreetMap",
+                   group = "OSM") %>%
+  addProviderTiles(provider = "CartoDB",
+                   group = "Carto") %>%
+  # set map to within Victoria bounding box
+  leaflet::fitBounds(lng1 = 140.9617,
+                     lng2 = 149.9763,
+                     lat1 = -39.13396,
+                     lat2 = -33.99605) %>%
+  # set max bounds of map
+  # disable dragging map; too far out of bounds
+  setMaxBounds(lng1 = 140.9617 - 0.4,
+               lng2 = 149.9763 + 0.4,
+               lat1 = -39.13396 - 0.4,
+               lat2 = -33.99605 + 0.4)
+
+# --- palette for polygon data
+pal <- leaflet::colorBin(palette = "YlOrRd",
+                         domain = pal_intervals$brks,
+                         bins = 5,
+                         pretty = T,
+                         reverse = F)
+
+# --- create df for each bushfire season for circle marker groups
+bf_season_2016_2017_df <- cluster_16_21_sf %>%
+  filter(bf_season == "2016-2017")
+
+bf_season_2017_2018_df <- cluster_16_21_sf %>%
+  filter(bf_season == "2017-2018")
+
+bf_season_2018_2019_df <- cluster_16_21_sf %>%
+  filter(bf_season == "2018-2019")
+
+bf_season_2019_2020_df <- cluster_16_21_sf %>%
+  filter(bf_season == "2019-2020")
+
+bf_season_2020_2021_df <- cluster_16_21_sf %>%
+  filter(bf_season == "2020-2021")
+
+
+base_map %>%
+  # add outline of Victoria
+  addPolylines(data = vic_map_sf,
+               color = "black",
+               weight = 3) %>%
+  
+  # add gridded cell
+  addPolygons(data = model_df_pred,
+              opacity = 0.1,
+              layerId = ~id,
+              fillOpacity = 0.4,
+              color = ~pal(avg_pred_prop), # fill by `fire_count`; using above palette
+              popup = ~paste0("<b> id: ", id, "</b>", "<br/>",
+                              "number of ignitions: ", round(avg_pred_prop, 3))) %>% # click pop-up texts
+  
+  # --- add circle markers; each `bf_season` as a layer
+  # 2016-2017
+  addCircleMarkers(data = bf_season_2016_2017_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2016-2017") %>%
+  # 2017-2018
+  addCircleMarkers(data = bf_season_2017_2018_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2017-2018") %>%
+  # 2018-2019
+  addCircleMarkers(data = bf_season_2018_2019_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2018-2019") %>%
+  # 2019-2020
+  addCircleMarkers(data = bf_season_2019_2020_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2019-2020") %>%
+  # 2020-2021
+  addCircleMarkers(data = bf_season_2018_2019_df,
+                   radius = 2,
+                   fillOpacity = 0.01,
+                   color = "grey",
+                   group = "2020-2021") %>%
+  
+  # add user controls; for overlay groups
+  addLayersControl(baseGroups = c("OSM", "Carto"),
+                   overlayGroups = c("2016-2017", "2017-2018", "2018-2019", "2019-2020", "2020-2021"),
+                   options = layersControlOptions(collapsed = FALSE)) %>%
+  
+  # uncheck groups
+  hideGroup(c("2017-2018", "2018-2019", "2019-2020", "2020-2021")) %>%
+  
+  # add & customise legend
+  addLegend(pal = pal,
+            values = pal_intervals$brks,
+            title = "predicted avg. proportion",
+            position = "bottomright") %>%
+  
+  # add Reset button
+  leaflet.extras::addResetMapButton()
+```
+
+## allow users; toggle variables
+```{r}
+# --- get mean and sd; for each variable
+df <- model_df2 %>% 
+  na.omit() %>% 
+  filter(month == 12) %>% # user selected month
+  # compute mean & sd for each cell
+  group_by(id) %>% 
+  summarise(across(.cols = c(daily_rain:s0_pct),
+                   .fns = list(mean = mean,
+                               sd = sd),
+                   .names = "{.col}_{.fn}")) 
+```
+
+
+```{r}
+model_df2 %>% 
+  na.omit() %>% 
+  # select variables; user toggle
+  dplyr::select(id, year, month, daily_rain:s0_pct) %>% 
+  pivot_longer(cols = daily_rain:s0_pct,
+               values_to = "value",
+               names_to = "var") %>% 
+  group_by(id, var) %>% 
+  mutate(z = (value - mean(value)) / sd(value),
+            mean = mean(value), 
+            sd = sd(value)) %>% 
+  select(id, year, month, var, z) %>% 
+  pivot_wider(names_from = var,
+              values_from = z) %>% 
+  # compute 1st lag
+  mutate(across(.cols = daily_rain:s0_pct,
+                .fns = ~lag(.x),
+                .names = "{.col}_1")) %>% 
+  # compute 2nd lag
+  mutate(across(.cols = daily_rain:s0_pct,
+                .fns = ~lag(.x,
+                            n = 2),
+                .names = "{.col}_2")) %>% 
+  left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+                                                  forest, fire_count, x, y), # variables to join
+            by = c("id", "year", "month")) %>% 
+  relocate(fire_count, x, y,
+           .after = "year")
+```
+
+```{r}
+# --- e.g. if user doesn't toggle variables
+
+model_df2_temp <- model_df2 %>% 
+  na.omit() %>% 
+  # select variables; user toggle
+  select(id, year, month, daily_rain:s0_pct,
+         -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
+  pivot_longer(cols = daily_rain:s0_pct,
+               values_to = "value",
+               names_to = "var") %>% 
+  # for each id & variable
+  group_by(id, var, month) %>% 
+  mutate(z = (value - mean(value, na.rm = T)) / sd(value, na.rm = T), # compute z RV
+         mean = mean(value, na.rm = T), # compute mean
+         sd = sd(value, na.rm = T)) # compute sd 
+
+# --- temper variables
+
+# `daily_rain`
+model_df2_temp$value[model_df2_temp$var == "daily_rain"] <- model_df2_temp %>% 
+  filter(var == "daily_rain") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `et_short_crop`
+model_df2_temp$value[model_df2_temp$var == "et_short_crop"] <- model_df2_temp %>% 
+  filter(var == "et_short_crop") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `max_temp`
+model_df2_temp$value[model_df2_temp$var == "max_temp"] <- model_df2_temp %>% 
+  filter(var == "max_temp") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `radiation`
+model_df2_temp$value[model_df2_temp$var == "radiation"] <- model_df2_temp %>% 
+  filter(var == "radiation") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `rh`
+model_df2_temp$value[model_df2_temp$var == "rh"] <- model_df2_temp %>% 
+  filter(var == "rh") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+
+# `si10`
+model_df2_temp$value[model_df2_temp$var == "si10"] <- model_df2_temp %>% 
+  filter(var == "si10") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `s0_pct`
+model_df2_temp$value[model_df2_temp$var == "s0_pct"] <- model_df2_temp %>% 
+  filter(var == "s0_pct") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# --- recreate `model_df2` with tampered variables
+model_df2_temp2 <- model_df2_temp %>%  
+  select(id, year, month, var, value) %>% 
+  pivot_wider(names_from = var,
+              values_from = value) %>% 
+  ungroup() %>% 
+  
+  # ****** 
+  # compute 1st lag
+  mutate(across(.cols = daily_rain:s0_pct,
+                .fns = ~lag(.x),
+                .names = "{.col}_1")) %>%
+  # compute 2nd lag
+  mutate(across(.cols = daily_rain:s0_pct,
+                .fns = ~lag(.x,
+                            n = 2),
+                .names = "{.col}_2")) %>%
+  na.omit() %>%
+  
+  
+  left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+                                                  forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+            by = c("id", "year", "month")) %>% 
+  relocate(fire_count, x, y,
+           .after = "year") %>% 
+  filter(month == 12) %>% 
+  # make predictions
+      mutate(pred = predict(model, .)$predictions,
+             .after = "fire_count") %>%
+      group_by(id) %>%
+      summarise(avg_pred = mean(pred)) %>%
+      ungroup() %>%
+      mutate(total = sum(avg_pred)) %>%
+      mutate(avg_pred_prop = avg_pred / total,
+             .after = "avg_pred")
+
+# extract `id` & `geometry` column (i.e. polygon for each grid cell)
+vic_raster_crop_sf %>%
+  mutate(id = as_factor(id)) %>%
+  # join with predicted data
+  left_join(., model_df2_temp2)
+  
+sum(model_df2_temp2$avg_pred) 
+```
+
+```{r}
+model_df2_temp %>%  
+  select(id, year, month, var, value) %>% 
+  pivot_wider(names_from = var,
+              values_from = value) %>% 
+  ungroup() %>% 
+  
+  # ****** 
+  # compute 1st lag
+  mutate(across(.cols = daily_rain:s0_pct,
+                .fns = ~lag(.x),
+                .names = "{.col}_1")) %>%
+  # compute 2nd lag
+  mutate(across(.cols = daily_rain:s0_pct,
+                .fns = ~lag(.x,
+                            n = 2),
+                .names = "{.col}_2")) %>%
+  na.omit() %>%
+  
+  
+  left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+                                                  forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+            by = c("id", "year", "month")) %>% 
+  relocate(fire_count, x, y,
+           .after = "year") %>% 
+  filter(month == 12) %>% 
+  filter(id == 1) %>% 
+  summarise(across(.cols = daily_rain:s0_pct,
+                   .fns = list(mean = mean,
+                               sd = sd),
+                   .names = "{.col}_{.fn}"))
+  
+```
+
+
+
+```{r}
+# ***************** don't user toggle does NOT change lag variables *****************
+model_df2_temp <- model_df2 %>% 
+  na.omit() %>% 
+  # select variables; user toggle
+  select(id, year, month, daily_rain:s0_pct,
+         -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
+  pivot_longer(cols = daily_rain:s0_pct,
+               values_to = "value",
+               names_to = "var") %>% 
+  # for each id & variable
+  group_by(id, var, month) %>% 
+  mutate(z = (value - mean(value, na.rm = T)) / sd(value, na.rm = T), # compute z RV
+         mean = mean(value, na.rm = T), # compute mean
+         sd = sd(value, na.rm = T)) # compute sd 
+
+# --- temper variables
+
+# `daily_rain`
+model_df2_temp$value[model_df2_temp$var == "daily_rain"] <- model_df2_temp %>% 
+  filter(var == "daily_rain") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `et_short_crop`
+model_df2_temp$value[model_df2_temp$var == "et_short_crop"] <- model_df2_temp %>% 
+  filter(var == "et_short_crop") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `max_temp`
+model_df2_temp$value[model_df2_temp$var == "max_temp"] <- model_df2_temp %>% 
+  filter(var == "max_temp") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `radiation`
+model_df2_temp$value[model_df2_temp$var == "radiation"] <- model_df2_temp %>% 
+  filter(var == "radiation") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `rh`
+model_df2_temp$value[model_df2_temp$var == "rh"] <- model_df2_temp %>% 
+  filter(var == "rh") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+
+# `si10`
+model_df2_temp$value[model_df2_temp$var == "si10"] <- model_df2_temp %>% 
+  filter(var == "si10") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `s0_pct`
+model_df2_temp$value[model_df2_temp$var == "s0_pct"] <- model_df2_temp %>% 
+  filter(var == "s0_pct") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# --- recreate `model_df2` with tampered variables
+model_df2_temp2 <- model_df2_temp %>%  
+  select(id, year, month, var, value) %>% 
+  pivot_wider(names_from = var,
+              values_from = value) %>% 
+  ungroup() %>% 
+  
+  # ****** comment away here
+  # # compute 1st lag
+  # mutate(across(.cols = daily_rain:s0_pct,
+  #               .fns = ~lag(.x),
+  #               .names = "{.col}_1")) %>%
+  # # compute 2nd lag
+  # mutate(across(.cols = daily_rain:s0_pct,
+  #               .fns = ~lag(.x,
+  #                           n = 2),
+  #               .names = "{.col}_2")) %>%
+  # na.omit() %>%
+  # left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+  #                                                 forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+  # by = c("id", "year", "month")) %>%
+
+  left_join(., model_df2 %>% na.omit() %>% select(id, year, month, # keys
+                                                  x, y, fire_count, lai_lv, lai_hv, forest:last_col()), # variables to join
+            by = c("id", "year", "month"))  %>%
+
+  relocate(fire_count, x, y,
+           .after = "year") %>% 
+  filter(month == 12) %>% 
+  # make predictions
+      mutate(pred = predict(model, .)$predictions,
+             .after = "fire_count") %>%
+      group_by(id) %>%
+      summarise(avg_pred = mean(pred)) %>%
+      ungroup() %>%
+      mutate(total = sum(avg_pred)) %>%
+      mutate(avg_pred_prop = avg_pred / total,
+             .after = "avg_pred")
+
+# extract `id` & `geometry` column (i.e. polygon for each grid cell)
+vic_raster_crop_sf %>%
+  mutate(id = as_factor(id)) %>%
+  # join with predicted data
+  left_join(., model_df2_temp2)
+```
+
+
+
+
+
+```{r}
+model_df_pred_temp <- model_df2 %>%
+  na.omit() %>%
+  ungroup() %>%
+  # allow users: choose month
+  dplyr::filter(month == input$month_chosen) %>% # filter to user selected month
+  # make predictions
+  mutate(pred = predict(model, .)$predictions,
+         .after = "fire_count") %>%
+  group_by(id) %>%
+  summarise(avg_pred = mean(pred)) %>%
+  ungroup() %>%
+  mutate(total = sum(avg_pred)) %>%
+  mutate(avg_pred_prop = avg_pred / total,
+         .after = "avg_pred")
+
+# extract `id` & `geometry` column (i.e. polygon for each grid cell)
+vic_raster_crop_sf %>%
+  mutate(id = as_factor(id)) %>%
+  # join with predicted data
+  left_join(., model_df_pred_temp)
+```
+
+
+```{r}
+model_df2 %>%
+      na.omit() %>%
+      ungroup() %>%
+      # allow users: choose month
+      dplyr::filter(month == 12) %>% # filter to user selected month
+      # make predictions
+      mutate(pred = predict(model, .)$predictions,
+             .after = "fire_count") %>%
+      group_by(id) %>%
+      summarise(avg_pred = mean(pred)) %>%
+      ungroup() %>%
+      mutate(total = sum(avg_pred)) %>%
+      mutate(avg_pred_prop = avg_pred / total,
+             .after = "avg_pred")
+```
+
+
+## plotlys; show at bottom of app
+```{r}
+# --- `model_df2_avg` if user doesn't tamper variable values
+
+model_df2_temp <- model_df2 %>% 
+  na.omit() %>% 
+  # select variables; user toggle
+  select(id, year, month, daily_rain:s0_pct,
+         -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
+  pivot_longer(cols = daily_rain:s0_pct,
+               values_to = "value",
+               names_to = "var") %>% 
+  # for each id & variable
+  group_by(id, var, month) %>% 
+  mutate(z = (value - mean(value, na.rm = T)) / sd(value, na.rm = T), # compute z RV
+         mean = mean(value, na.rm = T), # compute mean
+         sd = sd(value, na.rm = T)) # compute sd 
+
+# --- temper variables; based on z-scores
+
+# `daily_rain`
+model_df2_temp$value[model_df2_temp$var == "daily_rain"] <- model_df2_temp %>% 
+  filter(var == "daily_rain") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `et_short_crop`
+model_df2_temp$value[model_df2_temp$var == "et_short_crop"] <- model_df2_temp %>% 
+  filter(var == "et_short_crop") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `max_temp`
+model_df2_temp$value[model_df2_temp$var == "max_temp"] <- model_df2_temp %>% 
+  filter(var == "max_temp") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `radiation`
+model_df2_temp$value[model_df2_temp$var == "radiation"] <- model_df2_temp %>% 
+  filter(var == "radiation") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `rh`
+model_df2_temp$value[model_df2_temp$var == "rh"] <- model_df2_temp %>% 
+  filter(var == "rh") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+
+# `si10`
+model_df2_temp$value[model_df2_temp$var == "si10"] <- model_df2_temp %>% 
+  filter(var == "si10") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `s0_pct`
+model_df2_temp$value[model_df2_temp$var == "s0_pct"] <- model_df2_temp %>% 
+  filter(var == "s0_pct") %>% 
+  mutate(z = z + 0) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+model_df2_avg <- model_df2_temp %>%  
+  select(id, year, month, var, value) %>% 
+  pivot_wider(names_from = var,
+              values_from = value)
+```
+
+```{r}
+# --- `model_df2_high`: if user set to 100% (upper bound)
+
+model_df2_temp <- model_df2 %>% 
+  na.omit() %>% 
+  # select variables; user toggle
+  select(id, year, month, daily_rain:s0_pct,
+         -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
+  pivot_longer(cols = daily_rain:s0_pct,
+               values_to = "value",
+               names_to = "var") %>% 
+  # for each id & variable
+  group_by(id, var, month) %>% 
+  mutate(z = (value - mean(value, na.rm = T)) / sd(value, na.rm = T), # compute z RV
+         mean = mean(value, na.rm = T), # compute mean
+         sd = sd(value, na.rm = T)) # compute sd 
+
+# --- temper variables
+
+# `daily_rain`
+model_df2_temp$value[model_df2_temp$var == "daily_rain"] <- model_df2_temp %>% 
+  filter(var == "daily_rain") %>% 
+  mutate(z = z + 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `et_short_crop`
+model_df2_temp$value[model_df2_temp$var == "et_short_crop"] <- model_df2_temp %>% 
+  filter(var == "et_short_crop") %>% 
+  mutate(z = z + 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `max_temp`
+model_df2_temp$value[model_df2_temp$var == "max_temp"] <- model_df2_temp %>% 
+  filter(var == "max_temp") %>% 
+  mutate(z = z + 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `radiation`
+model_df2_temp$value[model_df2_temp$var == "radiation"] <- model_df2_temp %>% 
+  filter(var == "radiation") %>% 
+  mutate(z = z + 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `rh`
+model_df2_temp$value[model_df2_temp$var == "rh"] <- model_df2_temp %>% 
+  filter(var == "rh") %>% 
+  mutate(z = z + 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+
+# `si10`
+model_df2_temp$value[model_df2_temp$var == "si10"] <- model_df2_temp %>% 
+  filter(var == "si10") %>% 
+  mutate(z = z + 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `s0_pct`
+model_df2_temp$value[model_df2_temp$var == "s0_pct"] <- model_df2_temp %>% 
+  filter(var == "s0_pct") %>% 
+  mutate(z = z + 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+model_df2_high <- model_df2_temp %>%  
+  select(id, year, month, var, value) %>% 
+  pivot_wider(names_from = var,
+              values_from = value)
+```
+
+
+```{r}
+# --- `model_df2_low`: if user set to -100% (lower bound) 
+model_df2_temp <- model_df2 %>% 
+  na.omit() %>% 
+  # select variables; user toggle
+  select(id, year, month, daily_rain:s0_pct,
+         -lai_hv, -lai_lv) %>% # most values; same throughout the years (no need toggle)
+  pivot_longer(cols = daily_rain:s0_pct,
+               values_to = "value",
+               names_to = "var") %>% 
+  # for each id & variable
+  group_by(id, var, month) %>% 
+  mutate(z = (value - mean(value, na.rm = T)) / sd(value, na.rm = T), # compute z RV
+         mean = mean(value, na.rm = T), # compute mean
+         sd = sd(value, na.rm = T)) # compute sd 
+
+# --- temper variables
+
+# `daily_rain`
+model_df2_temp$value[model_df2_temp$var == "daily_rain"] <- model_df2_temp %>% 
+  filter(var == "daily_rain") %>% 
+  mutate(z = z - 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `et_short_crop`
+model_df2_temp$value[model_df2_temp$var == "et_short_crop"] <- model_df2_temp %>% 
+  filter(var == "et_short_crop") %>% 
+  mutate(z = z - 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `max_temp`
+model_df2_temp$value[model_df2_temp$var == "max_temp"] <- model_df2_temp %>% 
+  filter(var == "max_temp") %>% 
+  mutate(z = z - 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `radiation`
+model_df2_temp$value[model_df2_temp$var == "radiation"] <- model_df2_temp %>% 
+  filter(var == "radiation") %>% 
+  mutate(z = z - 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `rh`
+model_df2_temp$value[model_df2_temp$var == "rh"] <- model_df2_temp %>% 
+  filter(var == "rh") %>% 
+  mutate(z = z - 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+
+# `si10`
+model_df2_temp$value[model_df2_temp$var == "si10"] <- model_df2_temp %>% 
+  filter(var == "si10") %>% 
+  mutate(z = z - 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+# `s0_pct`
+model_df2_temp$value[model_df2_temp$var == "s0_pct"] <- model_df2_temp %>% 
+  filter(var == "s0_pct") %>% 
+  mutate(z = z - 4) %>% # change z values; according to user toggle
+  mutate(z_updated = (z * sd) + mean) %>% 
+  pull(z_updated)
+
+model_df2_low <- model_df2_temp %>%  
+  select(id, year, month, var, value) %>% 
+  pivot_wider(names_from = var,
+              values_from = value)
+
+model_df2_low %>% 
+  filter(id == 1,
+         month == 10)
+```
+
+```{r}
+# --- rename variables; to distinct low// avg// high
+model_df2_low <- model_df2_low %>% 
+  rename_with(~paste0(., "_low"),
+              .cols = daily_rain:s0_pct)
+
+model_df2_avg <- model_df2_avg %>% 
+  rename_with(~paste0(., "_avg"),
+              .cols = daily_rain:s0_pct)
+
+model_df2_high <- model_df2_high %>% 
+  rename_with(~paste0(., "_high"),
+              .cols = daily_rain:s0_pct)
+
+# --- join dfs
+model_df2_low_avg_high <- left_join(model_df2_low, model_df2_avg,
+                                    by = c("id", "year", "month")) %>% 
+  left_join(., model_df2_high,
+            by = c("id", "year", "month"))
+
+# --- write to csv file 
+# model_df2_low_avg_high %>%
+#   write_csv(file = here::here("data/model_df2_low_avg_high.csv"))
+```
+
+
+```{r}
+# --- e.g. plotly
+model_df2_low_avg_high %>% 
+  ungroup() %>% 
+  filter(id == 274,
+         month == 10) %>% 
+  mutate(month = factor(month,
+                        levels = c(10, 11, 12, 1, 2, 3))) %>% 
+  plot_ly(data = .,
+          x = ~year,
+          y = ~max_temp_high,
+          type = "scatter",
+          mode = "lines",
+          line = list(color = 'transparent'),
+          showlegend = FALSE, 
+          name = 'High') %>% 
+  add_trace(x = ~year,
+            y = ~max_temp_low, 
+            type = 'scatter',
+            mode = 'lines',
+            fill = 'tonexty', 
+            fillcolor='rgba(0,100,80,0.2)',
+            line = list(color = 'transparent'),
+            showlegend = FALSE, 
+            name = 'Low') %>% 
+  add_trace(x = ~year, 
+            y = ~max_temp_avg,
+            type = 'scatter', 
+            mode = 'lines',
+            line = list(color='rgb(0,100,80)'),
+            name = 'Average') 
+```
+
+```{r}
+# --- add horizontal line
+hline <- function(y = 0) {
+  list(
+    type = "line", 
+    x0 = 0, 
+    x1 = 1, 
+    xref = "paper",
+    y0 = y, 
+    y1 = y, 
+    line = list(color = "#ff69b4", 
+                dash = "dash")
+  )
+}
+
+# --- e.g. plotly
+model_df2_low_avg_high %>% 
+  ungroup() %>% 
+  filter(id == 274,
+         month == 10) %>% 
+  mutate(month = factor(month,
+                        levels = c(10, 11, 12, 1, 2, 3))) %>% 
+  plot_ly(data = .,
+          x = ~year,
+          y = ~daily_rain_high,
+          type = "scatter",
+          mode = "lines",
+          line = list(color = 'transparent'),
+          showlegend = FALSE, 
+          name = 'High') %>% 
+  add_trace(x = ~year,
+            y = ~0, 
+            type = 'scatter',
+            mode = 'lines',
+            fill = 'tonexty', 
+            fillcolor='rgba(0,100,80,0.2)',
+            line = list(color = 'transparent'),
+            showlegend = FALSE, 
+            name = 'Low') %>% 
+  add_trace(x = ~year, 
+            y = ~daily_rain_avg,
+            type = 'scatter', 
+            mode = 'lines',
+            line = list(color='rgb(0,100,80)'),
+            name = 'Average',
+            showlegend = TRUE) %>% 
+  add_trace(x = ~year, 
+            y = ~daily_rain_avg + 1,
+            type = 'scatter', 
+            mode = 'lines',
+            line = list(color='#ff69b4'),
+            name = 'used',
+            showlegend = T) %>% 
+  layout(shapes = list(hline(1.5)), # e.g. average daily rain
+         legend = list(x = 0.45, y = 10))
+```
+
+
+
+```{r}
+month <- c('January', 'February', 'March', 'April', 'May', 'June', 'July',
+           'August', 'September', 'October', 'November', 'December')
+high_2014 <- c(28.8, 28.5, 37.0, 56.8, 69.7, 79.7, 78.5, 77.8, 74.1, 62.6, 45.3, 39.9)
+low_2014 <- c(12.7, 14.3, 18.6, 35.5, 49.9, 58.0, 60.0, 58.6, 51.7, 45.2, 32.2, 29.1)
+data <- data.frame(month, high_2014, low_2014)
+data$average_2014 <- rowMeans(data[,c("high_2014", "low_2014")])
+
+#The default order will be alphabetized unless specified as below:
+data$month <- factor(data$month, levels = data[["month"]])
+
+fig <- plot_ly(data, 
+               x = ~month, 
+               y = ~high_2014, 
+               type = 'scatter', 
+               mode = 'lines',
+               line = list(color = 'transparent'),
+               showlegend = FALSE, 
+               name = 'High 2014') 
+
+fig <- fig %>% 
+  add_trace(y = ~low_2014, 
+            type = 'scatter',
+            mode = 'lines',
+            fill = 'tonexty', 
+            fillcolor='rgba(0,100,80,0.2)',
+            line = list(color = 'transparent'),
+            showlegend = FALSE, name = 'Low 2014') 
+fig <- fig %>% add_trace(x = ~month, y = ~average_2014, type = 'scatter', mode = 'lines',
+            line = list(color='rgb(0,100,80)'),
+            name = 'Average') 
+fig <- fig %>% layout(title = "Average, High and Low Temperatures in New York",
+         paper_bgcolor='rgb(255,255,255)', plot_bgcolor='rgb(229,229,229)',
+         xaxis = list(title = "Months",
+                      gridcolor = 'rgb(255,255,255)',
+                      showgrid = TRUE,
+                      showline = FALSE,
+                      showticklabels = TRUE,
+                      tickcolor = 'rgb(127,127,127)',
+                      ticks = 'outside',
+                      zeroline = FALSE),
+         yaxis = list(title = "Temperature (degrees F)",
+                      gridcolor = 'rgb(255,255,255)',
+                      showgrid = TRUE,
+                      showline = FALSE,
+                      showticklabels = TRUE,
+                      tickcolor = 'rgb(127,127,127)',
+                      ticks = 'outside',
+                      zeroline = FALSE))
+
+fig
+```
+
+
+
+```{r}
+model_df2_avg %>% 
+  ungroup() %>% 
+  # compute 1st lag
+      mutate(across(.cols = daily_rain:s0_pct,
+                    .fns = ~lag(.x),
+                    .names = "{.col}_1")) %>%
+      # compute 2nd lag
+      mutate(across(.cols = daily_rain:s0_pct,
+                    .fns = ~lag(.x,
+                                n = 2),
+                    .names = "{.col}_2")) %>%
+      # join with full data set (with untempered variables)
+      na.omit() %>%
+      left_join(., model_df2 %>% na.omit() %>% dplyr::select(id, year, month, # keys
+                                                             forest, fire_count, x, y, lai_lv, lai_lv_1, lai_lv_2, lai_hv, lai_hv_1, lai_hv_2), # variables to join
+                by = c("id", "year", "month")) %>%
+      relocate(fire_count, x, y,
+               .after = "year") %>%
+      # filter to month chosen by user
+      filter(month == 12) %>%
+      # make predictions with `rf` model
+      mutate(pred = predict(model, .)$predictions,
+             .after = "fire_count") %>%
+      group_by(id) %>%
+      summarise(avg_pred = mean(pred)) %>%
+      ungroup() %>%
+      mutate(total = sum(avg_pred)) %>% # baseline total
+      mutate(avg_pred_prop = avg_pred / total,
+             .after = "avg_pred")
+```
+
+
+

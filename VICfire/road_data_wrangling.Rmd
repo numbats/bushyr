@@ -1,0 +1,99 @@
+---
+title: "test"
+author: "Helen Evangelina"
+date: "28/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# --- load libraries
+library(tidyverse)
+library(ozmaps)
+library(tmap)
+library(raster)
+library(sf)
+library(sp)
+library(spatstat)
+library(patchwork)
+library(rnaturalearth)
+```
+
+```{r}
+au_map <- ne_states(country = 'Australia', returnclass = 'sf')
+vic_map <- au_map[7,]
+
+road <- st_read(here::here("data/australia-latest-free.shp/gis_osm_roads_free_1.shp"))
+
+roads_in_vic <- st_intersects(vic_map$geometry, road$geometry)
+road <- road[roads_in_vic[[1]],]
+
+```
+
+```{r}
+road_omitted <- road %>% 
+  dplyr::select(osm_id, geometry) %>%
+  na.omit(geometry)
+
+
+vic_raster <- raster(
+  # no. of rows & columns (directly linked to resolution of grid cell)
+  nrows = 20,
+  ncols = 20,
+  
+  # bbox (bounding box of Victoria)
+  xmn = 140.9617,
+  xmx = 149.9763,
+  ymn = -39.13396,
+  ymx = -33.99605,
+  
+  # crs
+  crs = "+proj=longlat +datum=WGS84"
+  )
+
+vic_raster[] <- 1:ncell(vic_raster)
+
+data <- vector()
+for (i in 1:nrow(road_omitted)){
+  q <- st_as_sf(road_omitted$geometry[i])
+  data[i] <- unlist(extract(vic_raster, q))
+}
+data
+
+freq_table <- as.data.frame(table(data))
+```
+
+```{r}
+library(visdat)
+a <- is.na(road$osm_id)
+sum(a)
+```
+
+```{r}
+road
+```
+
+```{r}
+a <- st_intersects(vic_map, road)
+a
+```
+
+```{r}
+road_df <- as.data.frame(road)
+
+road_df_geom <- road_df %>%
+  dplyr::select(geometry)
+
+data2 <- vector()
+for (i in 1:nrow(road_df_geom)){
+  q <- st_as_sf(road_df_geom$geometry[i])
+    for (i in 1:length(unlist(extract(vic_raster, q)))){
+      data2 <- append(data2, unlist(extract(vic_raster, q))[i]) 
+  }
+}
+data2
+
+freq_table2 <- as.data.frame(table(data2))
+freq_table2
+```
+
